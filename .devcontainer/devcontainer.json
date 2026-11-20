@@ -1,0 +1,27 @@
+{
+  // プロジェクトのディレクトリ名を自動でコンテナ名に反映
+  "name": "${localWorkspaceFolderBasename} Dev Container",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  // ホスト側のフォルダ名と自動一致させる
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+
+  // ホスト側で実行：.devcontainer/.env を自動生成して docker-compose.yml に渡す
+  "initializeCommand": "bash .devcontainer/initialize.sh",
+
+  // --- プロジェクトの技術スタックに合わせて調整する箇所 ---
+  "forwardPorts": [5173],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "Vue.volar"
+      ]
+    }
+  },
+  // ----------------------------------------------------
+
+  "remoteUser": "root",
+
+  // コンテナ作成後に実行：証明書反映と依存パッケージのセットアップ
+  "postCreateCommand": "bash .devcontainer/post-create.sh"
+}
