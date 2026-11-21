@@ -238,35 +238,6 @@ generated.xml
 *.pfx
 </file>
 
-<file path="README.md">
-# devcon-tmpl
-
-## M5Stack シミュレーターの使い分け（m5.Dockerfile 利用時）
-
-プロジェクトの `platformio.ini` には用途別に3つの環境を定義して使います。
-
-| 環境名         | 用途                   | 特徴                                          |
-| :------------- | :--------------------- | :-------------------------------------------- |
-| `env:sim`      | 自動テスト・AI確認用   | `-DAUTO_EXIT_MS=3000` により3秒で自動終了する |
-| `env:sim-live` | 人間の目視デバッグ用   | 自動終了せず、noVNC 越しに画面操作できる      |
-| `env:device`   | M5Stack 実機書き込み用 | USB 経由で実機に転送する                      |
-
-### 1. ブラウザ（noVNC）で `sim-live` を確認する手順
-
-コンテナ内で仮想ディスプレイと noVNC を起動し、ホストのブラウザで `http://localhost:6080/vnc.html` にアクセスします。
-
-```bash
-# バックグラウンドで仮想画面・VNC・noVNCを起動
-Xvfb :99 -screen 0 640x480x24 &
-x11vnc -display :99 -nopw -forever -shared &
-websockify --web=/usr/share/novnc/ 6080 localhost:5900 &
-
-# シミュレーターをビルドして実行
-pio run -e sim-live
-.pio/build/sim-live/program
-```
-</file>
-
 <file path="base/.devcontainer/docker-compose.yml">
 services:
   app:
@@ -407,6 +378,50 @@ if [[ -d ".githooks" ]]; then
 fi
 </file>
 
+<file path="base/.devcontainer/.env.example">
+# 必須: dockerfiles/のDockerfileを指定
+DOCKERFILE_NAME=Dockerfile
+
+# 必須: プロジェクトのフォルダ名（devcontainer.json の workspaceFolder と一致させる）
+PROJECT_NAME=my-project
+
+# ==========================================
+# ビルド時・ベースイメージ関連
+# ==========================================
+
+# 各種ツール・ライブラリのバージョンやURL
+PLAYWRIGHT_VERSION=1.52.0
+NODE_MAJOR_VERSION=22
+PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+GITLEAKS_VERSION=8.30.0
+
+# PlatformIO グローバルライブラリ（m5.Dockerfile用）
+# 複数指定する場合はスペース区切りで記述します（バージョン指定やGit URLも可）
+# 例: PIO_LIBRARIES="m5stack/M5Unified bblanchon/ArduinoJson@^7.0.0 fastled/FastLED"
+PIO_LIBRARIES=m5stack/M5Unified
+
+# ==========================================
+# ネットワーク・デバイス・実行ユーザー設定
+# ==========================================
+# 推論サーバーのホスト名とIPアドレス
+INFER_HOST=dev-infer.local
+DEV_INFER_IP=192.168.1.100
+
+# フロントエンド開発 / noVNC 等のポート
+APP_PORT=5173
+NOVNC_PORT=6080
+
+# M5Stack等と通信する際のシリアルデバイスパス
+# 接続しない場合は /dev/null、接続時は /dev/ttyUSB0 などを指定
+SERIAL_DEVICE=/dev/null
+
+# 実行ユーザー (root もしくは vscode, node 等ベースイメージに依存)
+CONTAINER_USER=root
+
+# ホスト側のCaddyルート証明書パス（initialize.sh で自動設定されます）
+# HOST_CA_CERT_PATH=/etc/caddy/certs/ca.crt
+</file>
+
 <file path="base/dockerfiles/webapp.Dockerfile">
 # 不整合を防ぐため、Node.js向けのベースイメージはハードコードに戻す
 FROM mcr.microsoft.com/devcontainers/typescript-node:26-trixie
@@ -415,6 +430,7 @@ FROM mcr.microsoft.com/devcontainers/typescript-node:26-trixie
 ARG PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cpu"
 ARG PLAYWRIGHT_VERSION=1.52.0
 ARG GITLEAKS_VERSION=8.30.0
+ARG GH_VERSION=2.62.0
 
 # ユーザーに依存しない共有パスに配置する
 ENV VIRTUAL_ENV=/opt/venv
@@ -460,62 +476,102 @@ RUN curl -fsSL https://opencode.ai/v2/install | bash \
     && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
     && rm -rf /root/.opencode
 
-# 6. gitleaks のインストール（コミット前シークレット検出用、全ユーザーから使えるよう /usr/local/bin へ配置）
+# 6. gitleaks と gh (GitHub CLI) のインストール（全ユーザーから使えるよう /usr/local/bin へ配置）
 RUN ARCH=$(dpkg --print-architecture) \
     && case "${ARCH}" in \
-         amd64) GITLEAKS_ARCH="x64" ;; \
-         arm64) GITLEAKS_ARCH="arm64" ;; \
+         amd64) GITLEAKS_ARCH="x64"; GH_ARCH="amd64" ;; \
+         arm64) GITLEAKS_ARCH="arm64"; GH_ARCH="arm64" ;; \
          *) echo "Unsupported architecture: ${ARCH}" && exit 1 ;; \
        esac \
     && curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" \
        -o /tmp/gitleaks.tar.gz \
     && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks \
     && chmod 755 /usr/local/bin/gitleaks \
-    && rm -f /tmp/gitleaks.tar.gz
+    && rm -f /tmp/gitleaks.tar.gz \
+    && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz" \
+       -o /tmp/gh.tar.gz \
+    && tar -xzf /tmp/gh.tar.gz -C /tmp \
+    && mv /tmp/gh_${GH_VERSION}_linux_${GH_ARCH}/bin/gh /usr/local/bin/gh \
+    && chmod 755 /usr/local/bin/gh \
+    && rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_${GH_ARCH}
 </file>
 
-<file path="base/.devcontainer/.env.example">
-# 必須: dockerfiles/のDockerfileを指定
-DOCKERFILE_NAME=Dockerfile
+<file path="README.md">
+# devcon-tmpl
 
-# 必須: プロジェクトのフォルダ名（devcontainer.json の workspaceFolder と一致させる）
-PROJECT_NAME=my-project
+## M5Stack シミュレーターの使い分け（m5.Dockerfile 利用時）
 
-# ==========================================
-# ビルド時・ベースイメージ関連
-# ==========================================
+プロジェクトの `platformio.ini` には用途別に3つの環境を定義して使います。
 
-# 各種ツール・ライブラリのバージョンやURL
-PLAYWRIGHT_VERSION=1.52.0
-NODE_MAJOR_VERSION=22
-PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
-GITLEAKS_VERSION=8.30.0
+| 環境名         | 用途                   | 特徴                                          |
+| :------------- | :--------------------- | :-------------------------------------------- |
+| `env:sim`      | 自動テスト・AI確認用   | `-DAUTO_EXIT_MS=3000` により3秒で自動終了する |
+| `env:sim-live` | 人間の目視デバッグ用   | 自動終了せず、noVNC 越しに画面操作できる      |
+| `env:device`   | M5Stack 実機書き込み用 | USB 経由で実機に転送する                      |
 
-# PlatformIO グローバルライブラリ（m5.Dockerfile用）
-# 複数指定する場合はスペース区切りで記述します（バージョン指定やGit URLも可）
-# 例: PIO_LIBRARIES="m5stack/M5Unified bblanchon/ArduinoJson@^7.0.0 fastled/FastLED"
-PIO_LIBRARIES=m5stack/M5Unified
+### 1. ブラウザ（noVNC）で `sim-live` を確認する手順
 
-# ==========================================
-# ネットワーク・デバイス・実行ユーザー設定
-# ==========================================
-# 推論サーバーのホスト名とIPアドレス
-INFER_HOST=dev-infer.local
-DEV_INFER_IP=192.168.1.100
+コンテナ内で仮想ディスプレイと noVNC を起動し、ホストのブラウザで `http://localhost:6080/vnc.html` にアクセスします。
 
-# フロントエンド開発 / noVNC 等のポート
-APP_PORT=5173
-NOVNC_PORT=6080
+```bash
+# バックグラウンドで仮想画面・VNC・noVNCを起動
+Xvfb :99 -screen 0 640x480x24 &
+x11vnc -display :99 -nopw -forever -shared &
+websockify --web=/usr/share/novnc/ 6080 localhost:5900 &
 
-# M5Stack等と通信する際のシリアルデバイスパス
-# 接続しない場合は /dev/null、接続時は /dev/ttyUSB0 などを指定
-SERIAL_DEVICE=/dev/null
+# シミュレーターをビルドして実行
+pio run -e sim-live
+.pio/build/sim-live/program
+```
 
-# 実行ユーザー (root もしくは vscode, node 等ベースイメージに依存)
-CONTAINER_USER=root
+## GitHub CLI (gh) を使った PAT の保存・管理方法
 
-# ホスト側のCaddyルート証明書パス（initialize.sh で自動設定されます）
-# HOST_CA_CERT_PATH=/etc/caddy/certs/ca.crt
+Dev Container 内で GitHub のリポジトリにアクセスしたり、プライベートなリソースを扱うために、GitHub の Personal Access Token (PAT) を利用することがあります。
+本コンテナには GitHub CLI (`gh`) がプリインストールされています。以下の手順で安全に PAT を保存・管理できます。
+
+### 1. PAT の発行
+
+1. GitHub にログインし、`Settings` → `Developer settings` → `Personal access tokens` → `Tokens (classic)` または `Fine-grained tokens` を開きます。
+2. 必要なスコープ（`repo` 権限など）を持たせたトークンを発行し、コピーします。
+
+### 2. コンテナ内での PAT の保存
+
+コンテナのターミナルで以下のコマンドを実行し、プロンプトに従って認証を行います。
+
+```bash
+gh auth login
+```
+
+以下の手順で選択・入力して進めます：
+
+- **What account do you want to log into?** → `GitHub.com`
+- **What is your preferred protocol for Git operations?** → `HTTPS`（または `SSH`）
+- **Authenticate Git with your GitHub credentials?** → `Yes`
+- **How would you like to authenticate GitHub CLI?** → `Paste an authentication token`
+
+最後に、先ほどコピーした PAT をペーストして Enter を押します。
+
+これにより、コンテナ内に GitHub の認証情報が安全に保存され、Git 操作や `gh` コマンドで自動的に認証が行われるようになります。`.env` などに PAT を直接記述・保存する必要がなくなります。
+
+## GitHub 側の Secret Protection（Secret scanning）を有効にする手順
+
+本テンプレートではローカルの `gitleaks`（`pre-commit` フック）によるコミット前チェックに加え、GitHub リポジトリ側で **Secret Protection（Secret scanning / Push protection）** を有効化することで、トークンや API キーなどの機密情報漏洩を多層的に防止できます。
+
+> ※ パブリックリポジトリでは無料で利用できます。プライベートリポジトリの場合は、対象プラン（GitHub Secret Protection / GitHub Advanced Security）が有効になっている必要があります。
+
+### 1. Secret Protection の有効化
+
+1. GitHub で対象リポジトリのページを開き、上部の **`Settings`** タブをクリックします。
+2. 左サイドバーの `Security` セクションにある **`Advanced Security`**（表示環境によっては **`Code security and analysis`**）をクリックします。
+3. **`Secret Protection`**（または **`Secret scanning`**）の右側にある **`Enable`** ボタンをクリックします。
+4. 確認ダイアログが表示されたら、**`Enable Secret Protection`** をクリックして有効化します。
+
+### 2. Push protection の有効化（推奨）
+
+`Secret Protection` を有効化した後、あわせて **`Push protection`** を有効にしておくと、PAT や秘密鍵などが含まれるコミットを `git push` した際に GitHub 側で自動的にプッシュをブロックできます。
+
+1. 同じ **`Advanced Security`** 設定画面内の **`Push protection`** の右側にある **`Enable`** ボタンをクリックします。
+2. 有効化後、リポジトリ上部の **`Security`** タブ → 左メニューの **`Secret scanning`** から検出されたアラートの確認・管理が行えます。
 </file>
 
 <file path="base/dockerfiles/m5.Dockerfile">
@@ -526,6 +582,7 @@ FROM mcr.microsoft.com/devcontainers/cpp:trixie
 ARG NODE_MAJOR_VERSION=22
 ARG PIO_LIBRARIES="m5stack/M5Unified"
 ARG GITLEAKS_VERSION=8.30.0
+ARG GH_VERSION=2.62.0
 
 # ユーザー非依存の共有パスを設定（GUI関連環境変数は実行時docker-compose側へ移行）
 ENV PLATFORMIO_CORE_DIR=/opt/platformio
@@ -568,18 +625,24 @@ RUN npm install -g repomix \
     && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
     && rm -rf /root/.opencode
 
-# 4. gitleaks のインストール（コミット前シークレット検出用、全ユーザーから使えるよう /usr/local/bin へ配置）
+# 4. gitleaks と gh (GitHub CLI) のインストール（全ユーザーから使えるよう /usr/local/bin へ配置）
 RUN ARCH=$(dpkg --print-architecture) \
     && case "${ARCH}" in \
-         amd64) GITLEAKS_ARCH="x64" ;; \
-         arm64) GITLEAKS_ARCH="arm64" ;; \
+         amd64) GITLEAKS_ARCH="x64"; GH_ARCH="amd64" ;; \
+         arm64) GITLEAKS_ARCH="arm64"; GH_ARCH="arm64" ;; \
          *) echo "Unsupported architecture: ${ARCH}" && exit 1 ;; \
        esac \
     && curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" \
        -o /tmp/gitleaks.tar.gz \
     && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks \
     && chmod 755 /usr/local/bin/gitleaks \
-    && rm -f /tmp/gitleaks.tar.gz
+    && rm -f /tmp/gitleaks.tar.gz \
+    && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz" \
+       -o /tmp/gh.tar.gz \
+    && tar -xzf /tmp/gh.tar.gz -C /tmp \
+    && mv /tmp/gh_${GH_VERSION}_linux_${GH_ARCH}/bin/gh /usr/local/bin/gh \
+    && chmod 755 /usr/local/bin/gh \
+    && rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_${GH_ARCH}
 
 # 5. 必須ライブラリをグローバル領域に焼き込む（スペース区切りで複数指定に対応）
 RUN if [ -n "${PIO_LIBRARIES}" ]; then \

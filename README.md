@@ -1,5 +1,66 @@
 # devcon-tmpl
 
+## 既存の空 Git ローカルリポジトリに `base/` 以下をマージする方法
+
+本リポジトリの `base/` ディレクトリには、別プロジェクトのルートに展開して使うためのテンプレート一式（`.devcontainer/`、`.githooks/`、`dockerfiles/`、`.gitignore`、`.gitleaks.toml`、`opencode.json`）が含まれています。
+
+すでに存在する空の Git ローカルリポジトリ（`git init` 直後など）に対して、親ディレクトリ `base/` を作らず **中身だけをプロジェクトルート直下にマージ** するには、以下のいずれかの方法を使用します。
+
+### 方法 1: Git の履歴を保ったまま `base/` 以下をマージする（推奨）
+
+`git subtree split` を使って `base/` 配下のみの履歴を一時ブランチとして抽出し、対象リポジトリのルートにマージします。将来テンプレート側の `base/` が更新された際も、同様の手順で更新を取り込めます。
+
+対象のローカルリポジトリのルートディレクトリで以下を実行してください。
+
+```bash
+# 1. 空リポジトリ（コミットが0件）の場合、基準となる初期コミットを作成
+git branch -M main
+git commit --allow-empty -m "chore: initial commit"
+
+# 2. 本テンプレートリポジトリをリモートとして登録・取得
+# （ローカルパス /path/to/devcon-tmpl または GitHub リポジトリ URL を指定）
+git remote add template /path/to/devcon-tmpl
+git fetch template main
+
+# 3. 取得した履歴から base/ 配下のみを抽出したブランチを作成
+git checkout -b tmp-template-base FETCH_HEAD
+git subtree split --prefix=base -b template-base
+
+# 4. 元の main ブランチに戻り、base/ の中身をルート直下にマージ
+git checkout main
+git merge --allow-unrelated-histories template-base -m "chore: merge base template"
+
+# 5. 一時ブランチとリモートを削除（今後もテンプレート更新を追従したい場合は remote は残して可）
+git branch -D tmp-template-base template-base
+git remote remove template
+```
+
+### 方法 2: 履歴を引き継がずファイルのみをコピーする
+
+Git の履歴管理が不要で、初期ファイルとして展開したいだけの場合は、ローカルにクローンした `devcon-tmpl/base/` の中身をコピーします。
+
+```bash
+# 対象のローカルリポジトリのルートで実行（末尾を /. にすることで隠しファイルも含めてコピー）
+cp -r /path/to/devcon-tmpl/base/. .
+
+# ステージングしてコミット
+git add .
+git commit -m "chore: add base template files"
+```
+
+### マージ後の初期設定
+
+1. **使用する Dockerfile の指定**:
+   `.devcontainer/.env.example` をコピーして `.devcontainer/.env` を作成し（または Dev Container 起動時に自動生成された `.devcontainer/.env` を編集し）、`DOCKERFILE_NAME` をプロジェクトの用途に合わせて設定します。
+   - M5Stack 開発の場合: `DOCKERFILE_NAME=m5.Dockerfile`
+   - Web アプリ / Python / 音声・機械学習開発の場合: `DOCKERFILE_NAME=webapp.Dockerfile`
+2. **Git フック（`gitleaks`）の有効化**:
+   Dev Container 起動時に自動設定されますが、ホスト側でもコミット前に有効化する場合は以下を実行します。
+   ```bash
+   chmod +x .githooks/*
+   git config --local core.hooksPath .githooks
+   ```
+
 ## M5Stack シミュレーターの使い分け（m5.Dockerfile 利用時）
 
 プロジェクトの `platformio.ini` には用途別に3つの環境を定義して使います。
