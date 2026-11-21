@@ -8,15 +8,12 @@ import re
 PROTECTED_PATTERNS = [
     "unpack.py",
     "*.lock",
-    "*.md",
     ".gitignore",
     ".repomixignore",
     ".shellcheckrc",
-    ".chainlit/**/*",
     "pyproject.toml",
     "pyrightconfig.json",
     ".githooks/**/*",
-    "agent/**/*",
 ]
 
 
