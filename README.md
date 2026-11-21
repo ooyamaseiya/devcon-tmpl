@@ -53,3 +53,23 @@ gh auth login
 最後に、先ほどコピーした PAT をペーストして Enter を押します。
 
 これにより、コンテナ内に GitHub の認証情報が安全に保存され、Git 操作や `gh` コマンドで自動的に認証が行われるようになります。`.env` などに PAT を直接記述・保存する必要がなくなります。
+
+## GitHub 側の Secret Protection（Secret scanning）を有効にする手順
+
+本テンプレートではローカルの `gitleaks`（`pre-commit` フック）によるコミット前チェックに加え、GitHub リポジトリ側で **Secret Protection（Secret scanning / Push protection）** を有効化することで、トークンや API キーなどの機密情報漏洩を多層的に防止できます。
+
+> ※ パブリックリポジトリでは無料で利用できます。プライベートリポジトリの場合は、対象プラン（GitHub Secret Protection / GitHub Advanced Security）が有効になっている必要があります。
+
+### 1. Secret Protection の有効化
+
+1. GitHub で対象リポジトリのページを開き、上部の **`Settings`** タブをクリックします。
+2. 左サイドバーの `Security` セクションにある **`Advanced Security`**（表示環境によっては **`Code security and analysis`**）をクリックします。
+3. **`Secret Protection`**（または **`Secret scanning`**）の右側にある **`Enable`** ボタンをクリックします。
+4. 確認ダイアログが表示されたら、**`Enable Secret Protection`** をクリックして有効化します。
+
+### 2. Push protection の有効化（推奨）
+
+`Secret Protection` を有効化した後、あわせて **`Push protection`** を有効にしておくと、PAT や秘密鍵などが含まれるコミットを `git push` した際に GitHub 側で自動的にプッシュをブロックできます。
+
+1. 同じ **`Advanced Security`** 設定画面内の **`Push protection`** の右側にある **`Enable`** ボタンをクリックします。
+2. 有効化後、リポジトリ上部の **`Security`** タブ → 左メニューの **`Secret scanning`** から検出されたアラートの確認・管理が行えます。

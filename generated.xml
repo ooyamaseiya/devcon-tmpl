@@ -1,176 +1,4 @@
 <files>
-  <file path="base/dockerfiles/webapp.Dockerfile">
-# 不整合を防ぐため、Node.js向けのベースイメージはハードコードに戻す
-FROM mcr.microsoft.com/devcontainers/typescript-node:26-trixie
-
-# FROM以後に再度ARGを宣言
-ARG PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cpu"
-ARG PLAYWRIGHT_VERSION=1.52.0
-ARG GITLEAKS_VERSION=8.30.0
-ARG GH_VERSION=2.62.0
-
-# ユーザーに依存しない共有パスに配置する
-ENV VIRTUAL_ENV=/opt/venv
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
-ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
-
-# 1. システムパッケージ（Python、音声処理ライブラリ）と uv のインストール
-RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
-    && apt-get install -y --no-install-recommends \
-        python3 \
-        python3-pip \
-        python3-venv \
-        libsndfile1 \
-        ffmpeg \
-    && pip install --break-system-packages --no-cache-dir uv \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# 2. 共通CLIツール（repomix）
-RUN npm install -g repomix
-
-# 3. Playwright（ブラウザを共有パス /opt/ms-playwright へ配置）
-RUN npx -y playwright@${PLAYWRIGHT_VERSION} install --with-deps chromium \
-    && chmod -R a+rwX ${PLAYWRIGHT_BROWSERS_PATH}
-
-# 4. Python 仮想環境の作成と機械学習・音声処理パッケージのインストール
-RUN python3 -m venv ${VIRTUAL_ENV} \
-    && uv pip install --upgrade pip \
-    && uv pip install --no-cache \
-        torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL} \
-    && uv pip install --no-cache \
-        gymnasium \
-        stable-baselines3 \
-        librosa \
-        soundfile \
-        onnx \
-        onnxruntime \
-        scikit-learn \
-        pytest \
-    && chmod -R a+rwX ${VIRTUAL_ENV}
-
-# 5. opencode のインストール（全ユーザーから使えるよう /usr/local/bin へ配置）
-RUN curl -fsSL https://opencode.ai/v2/install | bash \
-    && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
-    && rm -rf /root/.opencode
-
-# 6. gitleaks と gh (GitHub CLI) のインストール（全ユーザーから使えるよう /usr/local/bin へ配置）
-RUN ARCH=$(dpkg --print-architecture) \
-    && case "${ARCH}" in \
-         amd64) GITLEAKS_ARCH="x64"; GH_ARCH="amd64" ;; \
-         arm64) GITLEAKS_ARCH="arm64"; GH_ARCH="arm64" ;; \
-         *) echo "Unsupported architecture: ${ARCH}" && exit 1 ;; \
-       esac \
-    && curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" \
-       -o /tmp/gitleaks.tar.gz \
-    && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks \
-    && chmod 755 /usr/local/bin/gitleaks \
-    && rm -f /tmp/gitleaks.tar.gz \
-    && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz" \
-       -o /tmp/gh.tar.gz \
-    && tar -xzf /tmp/gh.tar.gz -C /tmp \
-    && mv /tmp/gh_${GH_VERSION}_linux_${GH_ARCH}/bin/gh /usr/local/bin/gh \
-    && chmod 755 /usr/local/bin/gh \
-    && rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_${GH_ARCH}
-  </file>
-  <file path="base/dockerfiles/m5.Dockerfile">
-# 不整合を防ぐため、cpp向けのベースイメージはハードコードに戻す
-FROM mcr.microsoft.com/devcontainers/cpp:trixie
-
-# FROM以後にARGを宣言してビルド引数を利用可能にする
-ARG NODE_MAJOR_VERSION=22
-ARG PIO_LIBRARIES="m5stack/M5Unified"
-ARG GITLEAKS_VERSION=8.30.0
-ARG GH_VERSION=2.62.0
-
-# ユーザー非依存の共有パスを設定（GUI関連環境変数は実行時docker-compose側へ移行）
-ENV PLATFORMIO_CORE_DIR=/opt/platformio
-ENV VIRTUAL_ENV=/opt/venv
-ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
-
-# 1. システムパッケージ（Python / USB / GUI・VNC関連 / Node.js）を一括導入
-RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
-    && apt-get install -y --no-install-recommends \
-       python3 \
-       python3-pip \
-       python3-venv \
-       udev \
-       usbutils \
-       curl \
-       ca-certificates \
-       libsdl2-dev \
-       xvfb \
-       imagemagick \
-       x11vnc \
-       novnc \
-       websockify \
-    && curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR_VERSION}.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* \
-    # 実行ユーザーに関わらず XDG_RUNTIME_DIR をマウントできるよう汎用ディレクトリ作成
-    && mkdir -p /tmp/runtime-root && chmod 777 /tmp/runtime-root
-
-# 2. 共有Python仮想環境（/opt/venv）に PlatformIO CLI と pyserial を導入
-RUN python3 -m venv ${VIRTUAL_ENV} \
-    && pip install --no-cache-dir --upgrade pip uv \
-    && uv pip install --no-cache \
-       platformio \
-       pyserial \
-    && chmod -R a+rwX ${VIRTUAL_ENV}
-
-# 3. 共通CLIツール（repomix / opencode）をグローバルパスへ導入
-RUN npm install -g repomix \
-    && curl -fsSL https://opencode.ai/v2/install | bash \
-    && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
-    && rm -rf /root/.opencode
-
-# 4. gitleaks と gh (GitHub CLI) のインストール（全ユーザーから使えるよう /usr/local/bin へ配置）
-RUN ARCH=$(dpkg --print-architecture) \
-    && case "${ARCH}" in \
-         amd64) GITLEAKS_ARCH="x64"; GH_ARCH="amd64" ;; \
-         arm64) GITLEAKS_ARCH="arm64"; GH_ARCH="arm64" ;; \
-         *) echo "Unsupported architecture: ${ARCH}" && exit 1 ;; \
-       esac \
-    && curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" \
-       -o /tmp/gitleaks.tar.gz \
-    && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks \
-    && chmod 755 /usr/local/bin/gitleaks \
-    && rm -f /tmp/gitleaks.tar.gz \
-    && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz" \
-       -o /tmp/gh.tar.gz \
-    && tar -xzf /tmp/gh.tar.gz -C /tmp \
-    && mv /tmp/gh_${GH_VERSION}_linux_${GH_ARCH}/bin/gh /usr/local/bin/gh \
-    && chmod 755 /usr/local/bin/gh \
-    && rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_${GH_ARCH}
-
-# 5. 必須ライブラリをグローバル領域に焼き込む（スペース区切りで複数指定に対応）
-RUN if [ -n "${PIO_LIBRARIES}" ]; then \
-      for lib in ${PIO_LIBRARIES}; do \
-        pio pkg install -g --library "${lib}"; \
-      done; \
-    fi
-
-# 6. ダミープロジェクトでESP32 / ESP32-S3のツールチェーン＆フレームワークを焼き込む
-RUN mkdir -p /tmp/pio-warmup/src \
-    && printf '%s\n' \
-      '[env:m5stack-core2]' \
-      'platform = espressif32' \
-      'board = m5stack-core2' \
-      'framework = arduino' \
-      '' \
-      '[env:m5stack-cores3]' \
-      'platform = espressif32' \
-      'board = m5stack-cores3' \
-      'framework = arduino' \
-      > /tmp/pio-warmup/platformio.ini \
-    && printf '%s\n' \
-      '#include <M5Unified.h>' \
-      'void setup() { M5.begin(); }' \
-      'void loop() {}' \
-      > /tmp/pio-warmup/src/main.cpp \
-    && pio run -d /tmp/pio-warmup \
-    && rm -rf /tmp/pio-warmup \
-    && chmod -R a+rwX ${PLATFORMIO_CORE_DIR}
-  </file>
   <file path="README.md">
 # devcon-tmpl
 
@@ -227,5 +55,25 @@ gh auth login
 最後に、先ほどコピーした PAT をペーストして Enter を押します。
 
 これにより、コンテナ内に GitHub の認証情報が安全に保存され、Git 操作や `gh` コマンドで自動的に認証が行われるようになります。`.env` などに PAT を直接記述・保存する必要がなくなります。
+
+## GitHub 側の Secret Protection（Secret scanning）を有効にする手順
+
+本テンプレートではローカルの `gitleaks`（`pre-commit` フック）によるコミット前チェックに加え、GitHub リポジトリ側で **Secret Protection（Secret scanning / Push protection）** を有効化することで、トークンや API キーなどの機密情報漏洩を多層的に防止できます。
+
+> ※ パブリックリポジトリでは無料で利用できます。プライベートリポジトリの場合は、対象プラン（GitHub Secret Protection / GitHub Advanced Security）が有効になっている必要があります。
+
+### 1. Secret Protection の有効化
+
+1. GitHub で対象リポジトリのページを開き、上部の **`Settings`** タブをクリックします。
+2. 左サイドバーの `Security` セクションにある **`Advanced Security`**（表示環境によっては **`Code security and analysis`**）をクリックします。
+3. **`Secret Protection`**（または **`Secret scanning`**）の右側にある **`Enable`** ボタンをクリックします。
+4. 確認ダイアログが表示されたら、**`Enable Secret Protection`** をクリックして有効化します。
+
+### 2. Push protection の有効化（推奨）
+
+`Secret Protection` を有効化した後、あわせて **`Push protection`** を有効にしておくと、PAT や秘密鍵などが含まれるコミットを `git push` した際に GitHub 側で自動的にプッシュをブロックできます。
+
+1. 同じ **`Advanced Security`** 設定画面内の **`Push protection`** の右側にある **`Enable`** ボタンをクリックします。
+2. 有効化後、リポジトリ上部の **`Security`** タブ → 左メニューの **`Secret scanning`** から検出されたアラートの確認・管理が行えます。
   </file>
 </files>
