@@ -11,3 +11,13 @@ data/processed_realistic/
 webapp/dist/
 
 generated.xml
+
+# シークレット・環境変数・秘密鍵ファイル（gitleaks との多層防御）
+.env
+.env.*
+!.env.example
+.devcontainer/.env
+*.pem
+*.key
+*.p12
+*.pfx

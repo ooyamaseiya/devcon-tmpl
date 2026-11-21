@@ -4,6 +4,7 @@ FROM mcr.microsoft.com/devcontainers/cpp:trixie
 # FROM以後にARGを宣言してビルド引数を利用可能にする
 ARG NODE_MAJOR_VERSION=22
 ARG PIO_LIBRARIES="m5stack/M5Unified"
+ARG GITLEAKS_VERSION=8.30.0
 
 # ユーザー非依存の共有パスを設定（GUI関連環境変数は実行時docker-compose側へ移行）
 ENV PLATFORMIO_CORE_DIR=/opt/platformio
@@ -46,14 +47,27 @@ RUN npm install -g repomix \
     && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
     && rm -rf /root/.opencode
 
-# 4. 必須ライブラリをグローバル領域に焼き込む（スペース区切りで複数指定に対応）
+# 4. gitleaks のインストール（コミット前シークレット検出用、全ユーザーから使えるよう /usr/local/bin へ配置）
+RUN ARCH=$(dpkg --print-architecture) \
+    && case "${ARCH}" in \
+         amd64) GITLEAKS_ARCH="x64" ;; \
+         arm64) GITLEAKS_ARCH="arm64" ;; \
+         *) echo "Unsupported architecture: ${ARCH}" && exit 1 ;; \
+       esac \
+    && curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" \
+       -o /tmp/gitleaks.tar.gz \
+    && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks \
+    && chmod 755 /usr/local/bin/gitleaks \
+    && rm -f /tmp/gitleaks.tar.gz
+
+# 5. 必須ライブラリをグローバル領域に焼き込む（スペース区切りで複数指定に対応）
 RUN if [ -n "${PIO_LIBRARIES}" ]; then \
       for lib in ${PIO_LIBRARIES}; do \
         pio pkg install -g --library "${lib}"; \
       done; \
     fi
 
-# 5. ダミープロジェクトでESP32 / ESP32-S3のツールチェーン＆フレームワークを焼き込む
+# 6. ダミープロジェクトでESP32 / ESP32-S3のツールチェーン＆フレームワークを焼き込む
 RUN mkdir -p /tmp/pio-warmup/src \
     && printf '%s\n' \
       '[env:m5stack-core2]' \

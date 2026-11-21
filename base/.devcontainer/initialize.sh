@@ -58,3 +58,10 @@ fi
 
 # 6. プロジェクト名の動的設定
 upsert_env "PROJECT_NAME" "${PROJECT_NAME:-$(basename "$PWD")}" "$ENV_FILE"
+
+# 7. Git リポジトリ初期化済みの場合、ホスト側でも .githooks を有効化
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && [[ -d ".githooks" ]]; then
+  chmod +x .githooks/* 2>/dev/null || true
+  git config --local core.hooksPath .githooks
+  echo "[init] Git hooks path configured to .githooks"
+fi

@@ -59,24 +59,83 @@ base/
     webapp.Dockerfile
   .gitignore
   opencode.json
+.gitignore
 README.md
 </directory_structure>
 
 <files>
 This section contains the contents of the repository's files.
 
-<file path="base/.devcontainer/.env.example">
-# 必須: dockerfiles/のDockerfileを指定
-DOCKERFILE_NAME=Dockerfile
+<file path="base/.devcontainer/ruff.toml">
+line-length = 100
 
-# 必須: プロジェクトのフォルダ名（devcontainer.json の workspaceFolder と一致させる）
-PROJECT_NAME=my-project
+[lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
 
-# 必須: 推論サーバーのIPアドレス
-DEV_INFER_IP=192.168.1.100
+[format]
+quote-style = "double"
+indent-style = "space"
+</file>
 
-# 任意: ホスト側のCaddyルート証明書パス（デフォルトと異なる場合のみ指定）
-# HOST_CA_CERT_PATH=/Users/username/Library/Application Support/Caddy/pki/authorities/local/root.crt
+<file path="base/.gitignore">
+.pio
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch
+
+data/processed/
+data/processed_realistic/
+*.pth
+*.zip
+webapp/dist/
+
+generated.xml
+</file>
+
+<file path="base/opencode.json">
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "local-server": {
+      "name": "Dev Inference Server",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://dev-infer.local/v1"
+      },
+      "models": {
+        "Qwen3.8-27B-GGUF-UD-IQ4_XS": {
+          "name": "Qwen3.8 27B",
+          "limit": {
+            "context": 81264,
+            "output": 8192
+          }
+        },
+        "Kwaipilot_KAT-Coder-V2.5-Dev-GGUF-IQ4_XS": {
+          "name": "KAT-Coder-V2.5-Dev",
+          "limit": {
+            "context": 102400,
+            "output": 8192
+          }
+        },
+        "gpt-oss-20b-mxfp4-GGUF": {
+          "name": "GPT OSS 20B",
+          "reasoning": true,
+          "limit": {
+            "context": 122880,
+            "output": 16384
+          }
+        }
+      }
+    }
+  }
+}
+</file>
+
+<file path=".gitignore">
+generated.xml
+repomix-output.xml
 </file>
 
 <file path="base/.devcontainer/devcontainer.json">
@@ -120,7 +179,8 @@ DEV_INFER_IP=192.168.1.100
   },
   // ----------------------------------------------------
 
-  "remoteUser": "root",
+  // 実行ユーザーは docker-compose.yml 側の `user:` に委譲するためコメントアウトまたは削除
+  // "remoteUser": "root",
 
   // コンテナ作成後に実行：証明書反映と依存パッケージのセットアップ
   "postCreateCommand": "bash .devcontainer/post-create.sh"
@@ -132,10 +192,13 @@ services:
   app:
     build:
       context: ..
-      dockerfile: dockerfiles/${DOCKERFILE_NAME:?Dockerfile name must be set} # Need to specify Dockerfile
+      dockerfile: dockerfiles/${DOCKERFILE_NAME:?Dockerfile name must be set}
       args:
-        BASE_IMAGE: ${DEVCONTAINER_IMAGE:-mcr.microsoft.com/devcontainers/typescript-node:26-trixie}
+        # BASE_IMAGE は各Dockerfile固有の前提条件となるため削除
         PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.52.0}
+        NODE_MAJOR_VERSION: ${NODE_MAJOR_VERSION:-22}
+        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+        PIO_LIBRARIES: ${PIO_LIBRARIES:-m5stack/M5Unified}
     volumes:
       - ..:/workspaces/${PROJECT_NAME:?PROJECT_NAME must be set}:cached
       # node_modules をコンテナ専用ボリュームにしてI/Oとリビルド時の再DLを高速化
@@ -143,6 +206,17 @@ services:
       - ${HOST_CA_CERT_PATH:-/etc/caddy/certs/ca.crt}:/usr/local/share/ca-certificates/caddy-ca.crt:ro
     environment:
       NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
+      REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      DISPLAY: :99
+      XDG_RUNTIME_DIR: /tmp/runtime-${CONTAINER_USER:-root}
+    ports:
+      - "${APP_PORT:-5173}:${APP_PORT:-5173}"
+      - "${NOVNC_PORT:-6080}:${NOVNC_PORT:-6080}"
+    devices:
+      # シリアルデバイスをホストからコンテナへパススルー（不要な場合は /dev/null 等で回避）
+      - "${SERIAL_DEVICE:-/dev/null}:${SERIAL_DEVICE:-/dev/null}"
+    user: "${CONTAINER_USER:-root}"
     command: sleep infinity
     extra_hosts:
       - "${INFER_HOST:-dev-infer.local}:${DEV_INFER_IP:?DEV_INFER_IP must be set}"
@@ -157,13 +231,6 @@ set -euo pipefail
 
 ENV_FILE=".devcontainer/.env"
 ENV_EXAMPLE_FILE=".devcontainer/.env.example"
-
-# 名前解決したい「環境変数名:ホスト名」のペアを定義（増えたらここに追加）
-TARGET_HOSTS=(
-  "DEV_INFER_IP:dev-infer.local"
-  # "DEV_DB_IP:dev-db.local"
-  # "DEV_STORAGE_IP:dev-storage.local"
-)
 
 # 1. .env が未作成で .env.example がある場合は初期コピー
 if [[ ! -f "$ENV_FILE" && -f "$ENV_EXAMPLE_FILE" ]]; then
@@ -195,49 +262,185 @@ upsert_env() {
   ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
 }
 
-# 4. 定義された全ホストを名前解決して .env に反映
-for entry in "${TARGET_HOSTS[@]}"; do
-  var_name="${entry%%:*}"
-  hostname="${entry#*:}"
+# 4. INFER_HOST の名前解決と .env への反映
+# .env から INFER_HOST を取得、なければデフォルト値を使用
+INFER_HOST=$(grep "^INFER_HOST=" "$ENV_FILE" | cut -d '=' -f2 || echo "dev-infer.local")
+resolved_ip=$(resolve_ipv4 "$INFER_HOST")
+resolved_ip="${resolved_ip:-127.0.0.1}"
 
-  ip=$(resolve_ipv4 "$hostname")
-  resolved_ip="${ip:-127.0.0.1}"
+upsert_env "DEV_INFER_IP" "$resolved_ip" "$ENV_FILE"
+echo "[init] DEV_INFER_IP=${resolved_ip} (${INFER_HOST})"
 
-  upsert_env "$var_name" "$resolved_ip" "$ENV_FILE"
-  echo "[init] ${var_name}=${resolved_ip} (${hostname})"
-done
+# 5. OSに応じたデフォルトのCaddyルート証明書パスを設定
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    DEFAULT_CERT_PATH="${HOME}/Library/Application Support/Caddy/pki/authorities/local/root.crt"
+else
+    DEFAULT_CERT_PATH="/etc/caddy/certs/ca.crt"
+fi
 
-# 5. その他の動的変数も同様に共存可能
+# .env に HOST_CA_CERT_PATH が定義されていない、またはコメントアウトされている場合は追記
+if ! grep -q "^HOST_CA_CERT_PATH=" "$ENV_FILE"; then
+    upsert_env "HOST_CA_CERT_PATH" "$DEFAULT_CERT_PATH" "$ENV_FILE"
+    echo "[init] HOST_CA_CERT_PATH auto-configured for $(uname -s)"
+fi
+
+# 6. プロジェクト名の動的設定
 upsert_env "PROJECT_NAME" "${PROJECT_NAME:-$(basename "$PWD")}" "$ENV_FILE"
 </file>
 
 <file path="base/.devcontainer/post-create.sh">
-update-ca-certificates && apt-get update && apt-get install -y --no-install-recommends build-essential libsdl2-dev xvfb imagemagick x11vnc novnc websockify && rm -rf /var/lib/apt/lists/* && pip install --upgrade pip && pip install platformio pyserial && curl -fsSL https://opencode.ai/v2/install | bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-update-ca-certificates && sudo apt-get update && sudo apt-get install -y --no-install-recommends libsndfile1 ffmpeg && sudo rm -rf /var/lib/apt/lists/* && pip install --upgrade pip && pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu && pip install gymnasium stable-baselines3 librosa soundfile onnx onnxruntime scikit-learn pytest && curl -fsSL https://opencode.ai/v2/install | bash
+# Dockerfile 側で全てインストール済みのため、ここでは
+# コンテナ起動時にマウントされたルート証明書をシステムに反映させる処理のみ実行
+
+if command -v sudo >/dev/null 2>&1; then
+    sudo update-ca-certificates
+else
+    update-ca-certificates
+fi
+
+echo "[post-create] CA certificates updated successfully."
 </file>
 
-<file path="base/.devcontainer/ruff.toml">
-line-length = 100
+<file path="base/dockerfiles/webapp.Dockerfile">
+# 不整合を防ぐため、Node.js向けのベースイメージはハードコードに戻す
+FROM mcr.microsoft.com/devcontainers/typescript-node:26-trixie
 
-[lint]
-select = ["E", "F", "I", "UP", "B"]
-ignore = ["E501"]
+# FROM以後に再度ARGを宣言
+ARG PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cpu"
+ARG PLAYWRIGHT_VERSION=1.52.0
 
-[format]
-quote-style = "double"
-indent-style = "space"
+# ユーザーに依存しない共有パスに配置する
+ENV VIRTUAL_ENV=/opt/venv
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+
+# 1. システムパッケージ（Python、音声処理ライブラリ）と uv のインストール
+RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
+    && apt-get install -y --no-install-recommends \
+        python3 \
+        python3-pip \
+        python3-venv \
+        libsndfile1 \
+        ffmpeg \
+    && pip install --break-system-packages --no-cache-dir uv \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 2. 共通CLIツール（repomix）
+RUN npm install -g repomix
+
+# 3. Playwright（ブラウザを共有パス /opt/ms-playwright へ配置）
+RUN npx -y playwright@${PLAYWRIGHT_VERSION} install --with-deps chromium \
+    && chmod -R a+rwX ${PLAYWRIGHT_BROWSERS_PATH}
+
+# 4. Python 仮想環境の作成と機械学習・音声処理パッケージのインストール
+RUN python3 -m venv ${VIRTUAL_ENV} \
+    && uv pip install --upgrade pip \
+    && uv pip install --no-cache \
+        torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL} \
+    && uv pip install --no-cache \
+        gymnasium \
+        stable-baselines3 \
+        librosa \
+        soundfile \
+        onnx \
+        onnxruntime \
+        scikit-learn \
+        pytest \
+    && chmod -R a+rwX ${VIRTUAL_ENV}
+
+# 5. opencode のインストール（全ユーザーから使えるよう /usr/local/bin へ配置）
+RUN curl -fsSL https://opencode.ai/v2/install | bash \
+    && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
+    && rm -rf /root/.opencode
+</file>
+
+<file path="README.md">
+# devcon-tmpl
+
+## M5Stack シミュレーターの使い分け（m5.Dockerfile 利用時）
+
+プロジェクトの `platformio.ini` には用途別に3つの環境を定義して使います。
+
+| 環境名         | 用途                   | 特徴                                          |
+| :------------- | :--------------------- | :-------------------------------------------- |
+| `env:sim`      | 自動テスト・AI確認用   | `-DAUTO_EXIT_MS=3000` により3秒で自動終了する |
+| `env:sim-live` | 人間の目視デバッグ用   | 自動終了せず、noVNC 越しに画面操作できる      |
+| `env:device`   | M5Stack 実機書き込み用 | USB 経由で実機に転送する                      |
+
+### 1. ブラウザ（noVNC）で `sim-live` を確認する手順
+
+コンテナ内で仮想ディスプレイと noVNC を起動し、ホストのブラウザで `http://localhost:6080/vnc.html` にアクセスします。
+
+```bash
+# バックグラウンドで仮想画面・VNC・noVNCを起動
+Xvfb :99 -screen 0 640x480x24 &
+x11vnc -display :99 -nopw -forever -shared &
+websockify --web=/usr/share/novnc/ 6080 localhost:5900 &
+
+# シミュレーターをビルドして実行
+pio run -e sim-live
+.pio/build/sim-live/program
+```
+</file>
+
+<file path="base/.devcontainer/.env.example">
+# 必須: dockerfiles/のDockerfileを指定
+DOCKERFILE_NAME=Dockerfile
+
+# 必須: プロジェクトのフォルダ名（devcontainer.json の workspaceFolder と一致させる）
+PROJECT_NAME=my-project
+
+# ==========================================
+# ビルド時・ベースイメージ関連
+# ==========================================
+
+# 各種ツール・ライブラリのバージョンやURL
+PLAYWRIGHT_VERSION=1.52.0
+NODE_MAJOR_VERSION=22
+PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+
+# PlatformIO グローバルライブラリ（m5.Dockerfile用）
+# 複数指定する場合はスペース区切りで記述します（バージョン指定やGit URLも可）
+# 例: PIO_LIBRARIES="m5stack/M5Unified bblanchon/ArduinoJson@^7.0.0 fastled/FastLED"
+PIO_LIBRARIES=m5stack/M5Unified
+
+# ==========================================
+# ネットワーク・デバイス・実行ユーザー設定
+# ==========================================
+# 推論サーバーのホスト名とIPアドレス
+INFER_HOST=dev-infer.local
+DEV_INFER_IP=192.168.1.100
+
+# フロントエンド開発 / noVNC 等のポート
+APP_PORT=5173
+NOVNC_PORT=6080
+
+# M5Stack等と通信する際のシリアルデバイスパス
+# 接続しない場合は /dev/null、接続時は /dev/ttyUSB0 などを指定
+SERIAL_DEVICE=/dev/null
+
+# 実行ユーザー (root もしくは vscode, node 等ベースイメージに依存)
+CONTAINER_USER=root
+
+# ホスト側のCaddyルート証明書パス（initialize.sh で自動設定されます）
+# HOST_CA_CERT_PATH=/etc/caddy/certs/ca.crt
 </file>
 
 <file path="base/dockerfiles/m5.Dockerfile">
+# 不整合を防ぐため、cpp向けのベースイメージはハードコードに戻す
 FROM mcr.microsoft.com/devcontainers/cpp:trixie
 
-# ユーザー非依存の共有パス＆root実行時のGUI/SDL2用環境変数を設定
+# FROM以後にARGを宣言してビルド引数を利用可能にする
+ARG NODE_MAJOR_VERSION=22
+ARG PIO_LIBRARIES="m5stack/M5Unified"
+
+# ユーザー非依存の共有パスを設定（GUI関連環境変数は実行時docker-compose側へ移行）
 ENV PLATFORMIO_CORE_DIR=/opt/platformio
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
-ENV DISPLAY=:99
-ENV XDG_RUNTIME_DIR=/tmp/runtime-root
 
 # 1. システムパッケージ（Python / USB / GUI・VNC関連 / Node.js）を一括導入
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
@@ -255,10 +458,11 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
        x11vnc \
        novnc \
        websockify \
-    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR_VERSION}.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p ${XDG_RUNTIME_DIR} && chmod 700 ${XDG_RUNTIME_DIR}
+    # 実行ユーザーに関わらず XDG_RUNTIME_DIR をマウントできるよう汎用ディレクトリ作成
+    && mkdir -p /tmp/runtime-root && chmod 777 /tmp/runtime-root
 
 # 2. 共有Python仮想環境（/opt/venv）に PlatformIO CLI と pyserial を導入
 RUN python3 -m venv ${VIRTUAL_ENV} \
@@ -274,8 +478,12 @@ RUN npm install -g repomix \
     && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
     && rm -rf /root/.opencode
 
-# 4. 必須ライブラリをグローバル領域に焼き込む（M5GFXも自動で入ります）
-RUN pio pkg install -g --library "m5stack/M5Unified"
+# 4. 必須ライブラリをグローバル領域に焼き込む（スペース区切りで複数指定に対応）
+RUN if [ -n "${PIO_LIBRARIES}" ]; then \
+      for lib in ${PIO_LIBRARIES}; do \
+        pio pkg install -g --library "${lib}"; \
+      done; \
+    fi
 
 # 5. ダミープロジェクトでESP32 / ESP32-S3のツールチェーン＆フレームワークを焼き込む
 RUN mkdir -p /tmp/pio-warmup/src \
@@ -298,112 +506,6 @@ RUN mkdir -p /tmp/pio-warmup/src \
     && pio run -d /tmp/pio-warmup \
     && rm -rf /tmp/pio-warmup \
     && chmod -R a+rwX ${PLATFORMIO_CORE_DIR}
-</file>
-
-<file path="base/dockerfiles/webapp.Dockerfile">
-FROM mcr.microsoft.com/devcontainers/typescript-node:26-trixie
-
-# ユーザーに依存しない共有パスに配置する
-ENV VIRTUAL_ENV=/opt/venv
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
-ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
-
-# 1. システムパッケージ（Python、音声処理ライブラリ）と uv のインストール
-RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
-    && apt-get install -y --no-install-recommends \
-        python3 \
-        python3-pip \
-        python3-venv \
-        libsndfile1 \
-        ffmpeg \
-    && pip install --break-system-packages --no-cache-dir uv \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# 2. 共通CLIツール（repomix）
-RUN npm install -g repomix
-
-# 3. Playwright（ARG定義を追加し、ブラウザを共有パス /opt/ms-playwright へ配置）
-ARG PLAYWRIGHT_VERSION=1.52.0
-RUN npx -y playwright@${PLAYWRIGHT_VERSION} install --with-deps chromium \
-    && chmod -R a+rwX ${PLAYWRIGHT_BROWSERS_PATH}
-
-# 4. Python 仮想環境の作成と機械学習・音声処理パッケージのインストール
-RUN python3 -m venv ${VIRTUAL_ENV} \
-    && uv pip install --upgrade pip \
-    && uv pip install --no-cache \
-        torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu \
-    && uv pip install --no-cache \
-        gymnasium \
-        stable-baselines3 \
-        librosa \
-        soundfile \
-        onnx \
-        onnxruntime \
-        scikit-learn \
-        pytest \
-    && chmod -R a+rwX ${VIRTUAL_ENV}
-
-# 5. opencode のインストール（全ユーザーから使えるよう /usr/local/bin へ配置）
-RUN curl -fsSL https://opencode.ai/v2/install | bash \
-    && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
-    && rm -rf /root/.opencode
-</file>
-
-<file path="base/.gitignore">
-.pio
-.vscode/.browse.c_cpp.db*
-.vscode/c_cpp_properties.json
-.vscode/launch.json
-.vscode/ipch
-
-data/processed/
-data/processed_realistic/
-*.pth
-*.zip
-webapp/dist/
-</file>
-
-<file path="base/opencode.json">
-{
-  "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "local-server": {
-      "name": "Dev Inference Server",
-      "npm": "@ai-sdk/openai-compatible",
-      "options": {
-        "baseURL": "https://dev-infer.local/v1"
-      },
-      "models": {
-        "Qwen3.8-27B-GGUF-UD-IQ4_XS": {
-          "name": "Qwen3.8 27B",
-          "limit": {
-            "context": 81264,
-            "output": 8192
-          }
-        },
-        "Kwaipilot_KAT-Coder-V2.5-Dev-GGUF-IQ4_XS": {
-          "name": "KAT-Coder-V2.5-Dev",
-          "limit": {
-            "context": 102400,
-            "output": 8192
-          }
-        },
-        "gpt-oss-20b-mxfp4-GGUF": {
-          "name": "GPT OSS 20B",
-          "reasoning": true,
-          "limit": {
-            "context": 122880,
-            "output": 16384
-          }
-        }
-      }
-    }
-  }
-}
-</file>
-
-<file path="README.md">
-# devcon-tmpl
 </file>
 
 </files>

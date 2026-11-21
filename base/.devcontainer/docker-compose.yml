@@ -9,6 +9,7 @@ services:
         NODE_MAJOR_VERSION: ${NODE_MAJOR_VERSION:-22}
         PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
         PIO_LIBRARIES: ${PIO_LIBRARIES:-m5stack/M5Unified}
+        GITLEAKS_VERSION: ${GITLEAKS_VERSION:-8.30.0}
     volumes:
       - ..:/workspaces/${PROJECT_NAME:?PROJECT_NAME must be set}:cached
       # node_modules をコンテナ専用ボリュームにしてI/Oとリビルド時の再DLを高速化

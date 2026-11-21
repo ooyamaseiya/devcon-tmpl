@@ -1,6 +1,67 @@
 <files>
+  <file path="base/.gitleaks.toml">
+title = "Project Gitleaks Config"
+
+[extend]
+# gitleaks 標準のビルトインルールセット（各種APIキー・トークン・秘密鍵等）をすべて継承
+useDefault = true
+
+[allowlist]
+description = "テンプレートおよびサンプル設定ファイルの除外"
+paths = [
+  '''^\.gitleaks\.toml$''',
+  '''^\.devcontainer/\.env\.example$''',
+  '''^\.env\.example$''',
+  '''^opencode\.json$''',
+]
+
+# プロジェクト固有のダミー値やテスト用文字列を除外したい場合は以下のように追記してください
+# regexes = [
+#   '''EXAMPLE_DUMMY_TOKEN_[A-Z0-9]+''',
+# ]
+  </file>
+  <file path="base/.githooks/pre-commit">
+#!/usr/bin/env bash
+set -euo pipefail
+
+# gitleaks が利用可能か確認
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "[gitleaks] エラー: gitleaks コマンドが見つかりません。" >&2
+  echo "[gitleaks] Dev Container 内でコミットするか、ホスト側にも gitleaks をインストールしてください。" >&2
+  echo "[gitleaks] 緊急時にチェックをスキップする場合: git commit --no-verify" >&2
+  exit 1
+fi
+
+echo "[gitleaks] ステージングされた変更のシークレット混入チェックを実行中..."
+gitleaks git --pre-commit --staged --redact --verbose
+  </file>
+  <file path="base/.gitignore">
+.pio
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch
+
+data/processed/
+data/processed_realistic/
+*.pth
+*.zip
+webapp/dist/
+
+generated.xml
+
+# シークレット・環境変数・秘密鍵ファイル（gitleaks との多層防御）
+.env
+.env.*
+!.env.example
+.devcontainer/.env
+*.pem
+*.key
+*.p12
+*.pfx
+  </file>
   <file path="base/.devcontainer/.env.example">
-# 必須: dockerfiles/のDockerfileを指定 (webapp.Dockerfile または m5.Dockerfile)
+# 必須: dockerfiles/のDockerfileを指定
 DOCKERFILE_NAME=Dockerfile
 
 # 必須: プロジェクトのフォルダ名（devcontainer.json の workspaceFolder と一致させる）
@@ -9,15 +70,12 @@ PROJECT_NAME=my-project
 # ==========================================
 # ビルド時・ベースイメージ関連
 # ==========================================
-# 【修正】ご指摘の通り、.envでベースイメージを切り替え可能にしてしまうと、
-# 指定したDockerfile（cpp用 / webapp用）とベースイメージの不一致による
-# ビルドエラーを誘発する危険性が高い（密結合の崩壊）ため、
-# DEVCONTAINER_IMAGE 変数は削除し、各 Dockerfile にハードコードする元の形に戻しました。
 
 # 各種ツール・ライブラリのバージョンやURL
 PLAYWRIGHT_VERSION=1.52.0
 NODE_MAJOR_VERSION=22
 PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+GITLEAKS_VERSION=8.30.0
 
 # PlatformIO グローバルライブラリ（m5.Dockerfile用）
 # 複数指定する場合はスペース区切りで記述します（バージョン指定やGit URLも可）
@@ -45,7 +103,209 @@ CONTAINER_USER=root
 # ホスト側のCaddyルート証明書パス（initialize.sh で自動設定されます）
 # HOST_CA_CERT_PATH=/etc/caddy/certs/ca.crt
   </file>
+  <file path="base/.devcontainer/docker-compose.yml">
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: dockerfiles/${DOCKERFILE_NAME:?Dockerfile name must be set}
+      args:
+        # BASE_IMAGE は各Dockerfile固有の前提条件となるため削除
+        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.52.0}
+        NODE_MAJOR_VERSION: ${NODE_MAJOR_VERSION:-22}
+        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+        PIO_LIBRARIES: ${PIO_LIBRARIES:-m5stack/M5Unified}
+        GITLEAKS_VERSION: ${GITLEAKS_VERSION:-8.30.0}
+    volumes:
+      - ..:/workspaces/${PROJECT_NAME:?PROJECT_NAME must be set}:cached
+      # node_modules をコンテナ専用ボリュームにしてI/Oとリビルド時の再DLを高速化
+      - node_modules:/workspaces/${PROJECT_NAME}/node_modules
+      - ${HOST_CA_CERT_PATH:-/etc/caddy/certs/ca.crt}:/usr/local/share/ca-certificates/caddy-ca.crt:ro
+    environment:
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
+      REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      DISPLAY: :99
+      XDG_RUNTIME_DIR: /tmp/runtime-${CONTAINER_USER:-root}
+    ports:
+      - "${APP_PORT:-5173}:${APP_PORT:-5173}"
+      - "${NOVNC_PORT:-6080}:${NOVNC_PORT:-6080}"
+    devices:
+      # シリアルデバイスをホストからコンテナへパススルー（不要な場合は /dev/null 等で回避）
+      - "${SERIAL_DEVICE:-/dev/null}:${SERIAL_DEVICE:-/dev/null}"
+    user: "${CONTAINER_USER:-root}"
+    command: sleep infinity
+    extra_hosts:
+      - "${INFER_HOST:-dev-infer.local}:${DEV_INFER_IP:?DEV_INFER_IP must be set}"
 
+volumes:
+  node_modules:
+  </file>
+  <file path="base/.devcontainer/initialize.sh">
+#!/usr/bin/env bash
+set -euo pipefail
+
+ENV_FILE=".devcontainer/.env"
+ENV_EXAMPLE_FILE=".devcontainer/.env.example"
+
+# 1. .env が未作成で .env.example がある場合は初期コピー
+if [[ ! -f "$ENV_FILE" && -f "$ENV_EXAMPLE_FILE" ]]; then
+  cp "$ENV_EXAMPLE_FILE" "$ENV_FILE"
+fi
+touch "$ENV_FILE"
+
+# 2. IPv4 名前解決ヘルパー（Linux / macOS 対応）
+resolve_ipv4() {
+  local host="$1"
+  if command -v getent >/dev/null 2>&1; then
+    getent ahostsv4 "$host" 2>/dev/null | awk '{print $1; exit}'
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c "import socket; print(socket.gethostbyname('$host'))" 2>/dev/null || true
+  fi
+}
+
+# 3. .env の特定キーだけを安全に更新・追記する関数（他の行は維持）
+upsert_env() {
+  local key="$1"
+  local value="$2"
+  local file="$3"
+
+  awk -v k="$key" -v v="$value" '
+    BEGIN { found = 0 }
+    $0 ~ "^" k "=" { print k "=" v; found = 1; next }
+    { print }
+    END { if (!found) print k "=" v }
+  ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+}
+
+# 4. INFER_HOST の名前解決と .env への反映
+# .env から INFER_HOST を取得、なければデフォルト値を使用
+INFER_HOST=$(grep "^INFER_HOST=" "$ENV_FILE" | cut -d '=' -f2 || echo "dev-infer.local")
+resolved_ip=$(resolve_ipv4 "$INFER_HOST")
+resolved_ip="${resolved_ip:-127.0.0.1}"
+
+upsert_env "DEV_INFER_IP" "$resolved_ip" "$ENV_FILE"
+echo "[init] DEV_INFER_IP=${resolved_ip} (${INFER_HOST})"
+
+# 5. OSに応じたデフォルトのCaddyルート証明書パスを設定
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    DEFAULT_CERT_PATH="${HOME}/Library/Application Support/Caddy/pki/authorities/local/root.crt"
+else
+    DEFAULT_CERT_PATH="/etc/caddy/certs/ca.crt"
+fi
+
+# .env に HOST_CA_CERT_PATH が定義されていない、またはコメントアウトされている場合は追記
+if ! grep -q "^HOST_CA_CERT_PATH=" "$ENV_FILE"; then
+    upsert_env "HOST_CA_CERT_PATH" "$DEFAULT_CERT_PATH" "$ENV_FILE"
+    echo "[init] HOST_CA_CERT_PATH auto-configured for $(uname -s)"
+fi
+
+# 6. プロジェクト名の動的設定
+upsert_env "PROJECT_NAME" "${PROJECT_NAME:-$(basename "$PWD")}" "$ENV_FILE"
+
+# 7. Git リポジトリ初期化済みの場合、ホスト側でも .githooks を有効化
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && [[ -d ".githooks" ]]; then
+  chmod +x .githooks/* 2>/dev/null || true
+  git config --local core.hooksPath .githooks
+  echo "[init] Git hooks path configured to .githooks"
+fi
+  </file>
+  <file path="base/.devcontainer/post-create.sh">
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 1. コンテナ起動時にマウントされたルート証明書をシステムに反映
+if command -v sudo >/dev/null 2>&1; then
+    sudo update-ca-certificates
+else
+    update-ca-certificates
+fi
+
+echo "[post-create] CA certificates updated successfully."
+
+# 2. Git リポジトリ内で .githooks が存在する場合、gitleaks 用の pre-commit フックを有効化
+if [[ -d ".githooks" ]]; then
+    chmod +x .githooks/* 2>/dev/null || true
+
+    # コンテナ実行ユーザーとホスト側ディレクトリ所有者が異なる場合の dubious ownership 対策
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
+    fi
+
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        git config --local core.hooksPath .githooks
+        echo "[post-create] Git hooks path configured to .githooks (gitleaks pre-commit enabled)."
+    else
+        echo "[post-create] Warning: Not a git repository yet. Run 'git init && git config --local core.hooksPath .githooks' to enable gitleaks hook."
+    fi
+fi
+  </file>
+  <file path="base/dockerfiles/webapp.Dockerfile">
+# 不整合を防ぐため、Node.js向けのベースイメージはハードコードに戻す
+FROM mcr.microsoft.com/devcontainers/typescript-node:26-trixie
+
+# FROM以後に再度ARGを宣言
+ARG PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cpu"
+ARG PLAYWRIGHT_VERSION=1.52.0
+ARG GITLEAKS_VERSION=8.30.0
+
+# ユーザーに依存しない共有パスに配置する
+ENV VIRTUAL_ENV=/opt/venv
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+
+# 1. システムパッケージ（Python、音声処理ライブラリ）と uv のインストール
+RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
+    && apt-get install -y --no-install-recommends \
+        python3 \
+        python3-pip \
+        python3-venv \
+        libsndfile1 \
+        ffmpeg \
+    && pip install --break-system-packages --no-cache-dir uv \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 2. 共通CLIツール（repomix）
+RUN npm install -g repomix
+
+# 3. Playwright（ブラウザを共有パス /opt/ms-playwright へ配置）
+RUN npx -y playwright@${PLAYWRIGHT_VERSION} install --with-deps chromium \
+    && chmod -R a+rwX ${PLAYWRIGHT_BROWSERS_PATH}
+
+# 4. Python 仮想環境の作成と機械学習・音声処理パッケージのインストール
+RUN python3 -m venv ${VIRTUAL_ENV} \
+    && uv pip install --upgrade pip \
+    && uv pip install --no-cache \
+        torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL} \
+    && uv pip install --no-cache \
+        gymnasium \
+        stable-baselines3 \
+        librosa \
+        soundfile \
+        onnx \
+        onnxruntime \
+        scikit-learn \
+        pytest \
+    && chmod -R a+rwX ${VIRTUAL_ENV}
+
+# 5. opencode のインストール（全ユーザーから使えるよう /usr/local/bin へ配置）
+RUN curl -fsSL https://opencode.ai/v2/install | bash \
+    && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
+    && rm -rf /root/.opencode
+
+# 6. gitleaks のインストール（コミット前シークレット検出用、全ユーザーから使えるよう /usr/local/bin へ配置）
+RUN ARCH=$(dpkg --print-architecture) \
+    && case "${ARCH}" in \
+         amd64) GITLEAKS_ARCH="x64" ;; \
+         arm64) GITLEAKS_ARCH="arm64" ;; \
+         *) echo "Unsupported architecture: ${ARCH}" && exit 1 ;; \
+       esac \
+    && curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" \
+       -o /tmp/gitleaks.tar.gz \
+    && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks \
+    && chmod 755 /usr/local/bin/gitleaks \
+    && rm -f /tmp/gitleaks.tar.gz
+  </file>
   <file path="base/dockerfiles/m5.Dockerfile">
 # 不整合を防ぐため、cpp向けのベースイメージはハードコードに戻す
 FROM mcr.microsoft.com/devcontainers/cpp:trixie
@@ -53,6 +313,7 @@ FROM mcr.microsoft.com/devcontainers/cpp:trixie
 # FROM以後にARGを宣言してビルド引数を利用可能にする
 ARG NODE_MAJOR_VERSION=22
 ARG PIO_LIBRARIES="m5stack/M5Unified"
+ARG GITLEAKS_VERSION=8.30.0
 
 # ユーザー非依存の共有パスを設定（GUI関連環境変数は実行時docker-compose側へ移行）
 ENV PLATFORMIO_CORE_DIR=/opt/platformio
@@ -95,14 +356,27 @@ RUN npm install -g repomix \
     && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
     && rm -rf /root/.opencode
 
-# 4. 必須ライブラリをグローバル領域に焼き込む（スペース区切りで複数指定に対応）
+# 4. gitleaks のインストール（コミット前シークレット検出用、全ユーザーから使えるよう /usr/local/bin へ配置）
+RUN ARCH=$(dpkg --print-architecture) \
+    && case "${ARCH}" in \
+         amd64) GITLEAKS_ARCH="x64" ;; \
+         arm64) GITLEAKS_ARCH="arm64" ;; \
+         *) echo "Unsupported architecture: ${ARCH}" && exit 1 ;; \
+       esac \
+    && curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" \
+       -o /tmp/gitleaks.tar.gz \
+    && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks \
+    && chmod 755 /usr/local/bin/gitleaks \
+    && rm -f /tmp/gitleaks.tar.gz
+
+# 5. 必須ライブラリをグローバル領域に焼き込む（スペース区切りで複数指定に対応）
 RUN if [ -n "${PIO_LIBRARIES}" ]; then \
       for lib in ${PIO_LIBRARIES}; do \
         pio pkg install -g --library "${lib}"; \
       done; \
     fi
 
-# 5. ダミープロジェクトでESP32 / ESP32-S3のツールチェーン＆フレームワークを焼き込む
+# 6. ダミープロジェクトでESP32 / ESP32-S3のツールチェーン＆フレームワークを焼き込む
 RUN mkdir -p /tmp/pio-warmup/src \
     && printf '%s\n' \
       '[env:m5stack-core2]' \
@@ -123,5 +397,62 @@ RUN mkdir -p /tmp/pio-warmup/src \
     && pio run -d /tmp/pio-warmup \
     && rm -rf /tmp/pio-warmup \
     && chmod -R a+rwX ${PLATFORMIO_CORE_DIR}
+  </file>
+  <file path="README.md">
+# devcon-tmpl
+
+`base/` を新規プロジェクトのルートディレクトリとしてコピーし、`.devcontainer/.env.example` を `.devcontainer/.env` にコピーして `DOCKERFILE_NAME` 等を設定することで Dev Container 環境を構築できます。
+
+## シークレット混入防止（gitleaks pre-commit フック）
+
+`base/` には、コミット前のシークレット（API キー・トークン・秘密鍵等）混入を自動ブロックする仕組みが組み込まれています。
+
+- **`gitleaks` バイナリ**: `webapp.Dockerfile` / `m5.Dockerfile` ビルド時に `/usr/local/bin/gitleaks` へ自動インストールされます。
+- **Git フック (`.githooks/pre-commit`)**: Dev Container 作成時（`post-create.sh`）および起動時（`initialize.sh`）に `git config --local core.hooksPath .githooks` が自動設定され、`git commit` 時にステージング済みの差分を自動スキャンします。
+- **設定ファイル (`.gitleaks.toml`)**: 標準ルールに加えてプロジェクト固有の除外設定（allowlist）を管理できます。
+
+> **注意**: コンテナ作成後に新しく `git init` を実行した場合は、一度以下のコマンドでフックを有効化してください。
+
+~~~bash
+git config --local core.hooksPath .githooks
+~~~
+
+### よく使うコマンド
+
+~~~bash
+# ステージング済みの変更を手動チェック
+gitleaks git --pre-commit --staged --redact --verbose
+
+# リポジトリ全体のコミット履歴をスキャン
+gitleaks git --redact --verbose
+
+# 誤検知などで一時的にフックをスキップしてコミットする場合
+git commit --no-verify
+~~~
+
+## M5Stack シミュレーターの使い分け（m5.Dockerfile 利用時）
+
+プロジェクトの `platformio.ini` には用途別に3つの環境を定義して使います。
+
+| 環境名         | 用途                   | 特徴                                          |
+| :------------- | :--------------------- | :-------------------------------------------- |
+| `env:sim`      | 自動テスト・AI確認用   | `-DAUTO_EXIT_MS=3000` により3秒で自動終了する |
+| `env:sim-live` | 人間の目視デバッグ用   | 自動終了せず、noVNC 越しに画面操作できる      |
+| `env:device`   | M5Stack 実機書き込み用 | USB 経由で実機に転送する                      |
+
+### 1. ブラウザ（noVNC）で `sim-live` を確認する手順
+
+コンテナ内で仮想ディスプレイと noVNC を起動し、ホストのブラウザで `http://localhost:6080/vnc.html` にアクセスします。
+
+~~~bash
+# バックグラウンドで仮想画面・VNC・noVNCを起動
+Xvfb :99 -screen 0 640x480x24 &
+x11vnc -display :99 -nopw -forever -shared &
+websockify --web=/usr/share/novnc/ 6080 localhost:5900 &
+
+# シミュレーターをビルドして実行
+pio run -e sim-live
+.pio/build/sim-live/program
+~~~
   </file>
 </files>
