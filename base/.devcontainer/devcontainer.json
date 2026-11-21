@@ -38,7 +38,8 @@
   },
   // ----------------------------------------------------
 
-  "remoteUser": "root",
+  // 実行ユーザーは docker-compose.yml 側の `user:` に委譲するためコメントアウトまたは削除
+  // "remoteUser": "root",
 
   // コンテナ作成後に実行：証明書反映と依存パッケージのセットアップ
   "postCreateCommand": "bash .devcontainer/post-create.sh"

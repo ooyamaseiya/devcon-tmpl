@@ -1,4 +1,9 @@
+# 不整合を防ぐため、Node.js向けのベースイメージはハードコードに戻す
 FROM mcr.microsoft.com/devcontainers/typescript-node:26-trixie
+
+# FROM以後に再度ARGを宣言
+ARG PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cpu"
+ARG PLAYWRIGHT_VERSION=1.52.0
 
 # ユーザーに依存しない共有パスに配置する
 ENV VIRTUAL_ENV=/opt/venv
@@ -19,8 +24,7 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 # 2. 共通CLIツール（repomix）
 RUN npm install -g repomix
 
-# 3. Playwright（ARG定義を追加し、ブラウザを共有パス /opt/ms-playwright へ配置）
-ARG PLAYWRIGHT_VERSION=1.52.0
+# 3. Playwright（ブラウザを共有パス /opt/ms-playwright へ配置）
 RUN npx -y playwright@${PLAYWRIGHT_VERSION} install --with-deps chromium \
     && chmod -R a+rwX ${PLAYWRIGHT_BROWSERS_PATH}
 
@@ -28,7 +32,7 @@ RUN npx -y playwright@${PLAYWRIGHT_VERSION} install --with-deps chromium \
 RUN python3 -m venv ${VIRTUAL_ENV} \
     && uv pip install --upgrade pip \
     && uv pip install --no-cache \
-        torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu \
+        torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL} \
     && uv pip install --no-cache \
         gymnasium \
         stable-baselines3 \

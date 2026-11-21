@@ -1,4 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
 
-update-ca-certificates && apt-get update && apt-get install -y --no-install-recommends build-essential libsdl2-dev xvfb imagemagick x11vnc novnc websockify && rm -rf /var/lib/apt/lists/* && pip install --upgrade pip && pip install platformio pyserial && curl -fsSL https://opencode.ai/v2/install | bash
+# Dockerfile 側で全てインストール済みのため、ここでは
+# コンテナ起動時にマウントされたルート証明書をシステムに反映させる処理のみ実行
 
-update-ca-certificates && sudo apt-get update && sudo apt-get install -y --no-install-recommends libsndfile1 ffmpeg && sudo rm -rf /var/lib/apt/lists/* && pip install --upgrade pip && pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu && pip install gymnasium stable-baselines3 librosa soundfile onnx onnxruntime scikit-learn pytest && curl -fsSL https://opencode.ai/v2/install | bash
+if command -v sudo >/dev/null 2>&1; then
+    sudo update-ca-certificates
+else
+    update-ca-certificates
+fi
+
+echo "[post-create] CA certificates updated successfully."

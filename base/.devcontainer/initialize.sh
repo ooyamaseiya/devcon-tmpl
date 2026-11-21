@@ -4,13 +4,6 @@ set -euo pipefail
 ENV_FILE=".devcontainer/.env"
 ENV_EXAMPLE_FILE=".devcontainer/.env.example"
 
-# 名前解決したい「環境変数名:ホスト名」のペアを定義（増えたらここに追加）
-TARGET_HOSTS=(
-  "DEV_INFER_IP:dev-infer.local"
-  # "DEV_DB_IP:dev-db.local"
-  # "DEV_STORAGE_IP:dev-storage.local"
-)
-
 # 1. .env が未作成で .env.example がある場合は初期コピー
 if [[ ! -f "$ENV_FILE" && -f "$ENV_EXAMPLE_FILE" ]]; then
   cp "$ENV_EXAMPLE_FILE" "$ENV_FILE"
@@ -41,18 +34,27 @@ upsert_env() {
   ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
 }
 
-# 4. 定義された全ホストを名前解決して .env に反映
-for entry in "${TARGET_HOSTS[@]}"; do
-  var_name="${entry%%:*}"
-  hostname="${entry#*:}"
+# 4. INFER_HOST の名前解決と .env への反映
+# .env から INFER_HOST を取得、なければデフォルト値を使用
+INFER_HOST=$(grep "^INFER_HOST=" "$ENV_FILE" | cut -d '=' -f2 || echo "dev-infer.local")
+resolved_ip=$(resolve_ipv4 "$INFER_HOST")
+resolved_ip="${resolved_ip:-127.0.0.1}"
 
-  ip=$(resolve_ipv4 "$hostname")
-  resolved_ip="${ip:-127.0.0.1}"
+upsert_env "DEV_INFER_IP" "$resolved_ip" "$ENV_FILE"
+echo "[init] DEV_INFER_IP=${resolved_ip} (${INFER_HOST})"
 
-  upsert_env "$var_name" "$resolved_ip" "$ENV_FILE"
-  echo "[init] ${var_name}=${resolved_ip} (${hostname})"
-done
+# 5. OSに応じたデフォルトのCaddyルート証明書パスを設定
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    DEFAULT_CERT_PATH="${HOME}/Library/Application Support/Caddy/pki/authorities/local/root.crt"
+else
+    DEFAULT_CERT_PATH="/etc/caddy/certs/ca.crt"
+fi
 
-# 5. その他の動的変数も同様に共存可能
+# .env に HOST_CA_CERT_PATH が定義されていない、またはコメントアウトされている場合は追記
+if ! grep -q "^HOST_CA_CERT_PATH=" "$ENV_FILE"; then
+    upsert_env "HOST_CA_CERT_PATH" "$DEFAULT_CERT_PATH" "$ENV_FILE"
+    echo "[init] HOST_CA_CERT_PATH auto-configured for $(uname -s)"
+fi
+
+# 6. プロジェクト名の動的設定
 upsert_env "PROJECT_NAME" "${PROJECT_NAME:-$(basename "$PWD")}" "$ENV_FILE"
-
