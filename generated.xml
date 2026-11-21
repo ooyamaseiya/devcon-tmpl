@@ -18,6 +18,10 @@ PROJECT_NAME=my-project
 PLAYWRIGHT_VERSION=1.52.0
 NODE_MAJOR_VERSION=22
 PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+
+# PlatformIO グローバルライブラリ（m5.Dockerfile用）
+# 複数指定する場合はスペース区切りで記述します（バージョン指定やGit URLも可）
+# 例: PIO_LIBRARIES="m5stack/M5Unified bblanchon/ArduinoJson@^7.0.0 fastled/FastLED"
 PIO_LIBRARIES=m5stack/M5Unified
 
 # ==========================================
@@ -40,44 +44,6 @@ CONTAINER_USER=root
 
 # ホスト側のCaddyルート証明書パス（initialize.sh で自動設定されます）
 # HOST_CA_CERT_PATH=/etc/caddy/certs/ca.crt
-  </file>
-
-  <file path="base/.devcontainer/docker-compose.yml">
-services:
-  app:
-    build:
-      context: ..
-      dockerfile: dockerfiles/${DOCKERFILE_NAME:?Dockerfile name must be set}
-      args:
-        # BASE_IMAGE は各Dockerfile固有の前提条件となるため削除
-        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.52.0}
-        NODE_MAJOR_VERSION: ${NODE_MAJOR_VERSION:-22}
-        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
-        PIO_LIBRARIES: ${PIO_LIBRARIES:-m5stack/M5Unified}
-    volumes:
-      - ..:/workspaces/${PROJECT_NAME:?PROJECT_NAME must be set}:cached
-      # node_modules をコンテナ専用ボリュームにしてI/Oとリビルド時の再DLを高速化
-      - node_modules:/workspaces/${PROJECT_NAME}/node_modules
-      - ${HOST_CA_CERT_PATH:-/etc/caddy/certs/ca.crt}:/usr/local/share/ca-certificates/caddy-ca.crt:ro
-    environment:
-      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
-      REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
-      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
-      DISPLAY: :99
-      XDG_RUNTIME_DIR: /tmp/runtime-${CONTAINER_USER:-root}
-    ports:
-      - "${APP_PORT:-5173}:${APP_PORT:-5173}"
-      - "${NOVNC_PORT:-6080}:${NOVNC_PORT:-6080}"
-    devices:
-      # シリアルデバイスをホストからコンテナへパススルー（不要な場合は /dev/null 等で回避）
-      - "${SERIAL_DEVICE:-/dev/null}:${SERIAL_DEVICE:-/dev/null}"
-    user: "${CONTAINER_USER:-root}"
-    command: sleep infinity
-    extra_hosts:
-      - "${INFER_HOST:-dev-infer.local}:${DEV_INFER_IP:?DEV_INFER_IP must be set}"
-
-volumes:
-  node_modules:
   </file>
 
   <file path="base/dockerfiles/m5.Dockerfile">
@@ -129,8 +95,12 @@ RUN npm install -g repomix \
     && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
     && rm -rf /root/.opencode
 
-# 4. 必須ライブラリをグローバル領域に焼き込む
-RUN pio pkg install -g --library "${PIO_LIBRARIES}"
+# 4. 必須ライブラリをグローバル領域に焼き込む（スペース区切りで複数指定に対応）
+RUN if [ -n "${PIO_LIBRARIES}" ]; then \
+      for lib in ${PIO_LIBRARIES}; do \
+        pio pkg install -g --library "${lib}"; \
+      done; \
+    fi
 
 # 5. ダミープロジェクトでESP32 / ESP32-S3のツールチェーン＆フレームワークを焼き込む
 RUN mkdir -p /tmp/pio-warmup/src \
@@ -153,58 +123,5 @@ RUN mkdir -p /tmp/pio-warmup/src \
     && pio run -d /tmp/pio-warmup \
     && rm -rf /tmp/pio-warmup \
     && chmod -R a+rwX ${PLATFORMIO_CORE_DIR}
-  </file>
-
-  <file path="base/dockerfiles/webapp.Dockerfile">
-# 不整合を防ぐため、Node.js向けのベースイメージはハードコードに戻す
-FROM mcr.microsoft.com/devcontainers/typescript-node:26-trixie
-
-# FROM以後に再度ARGを宣言
-ARG PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cpu"
-ARG PLAYWRIGHT_VERSION=1.52.0
-
-# ユーザーに依存しない共有パスに配置する
-ENV VIRTUAL_ENV=/opt/venv
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
-ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
-
-# 1. システムパッケージ（Python、音声処理ライブラリ）と uv のインストール
-RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
-    && apt-get install -y --no-install-recommends \
-        python3 \
-        python3-pip \
-        python3-venv \
-        libsndfile1 \
-        ffmpeg \
-    && pip install --break-system-packages --no-cache-dir uv \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# 2. 共通CLIツール（repomix）
-RUN npm install -g repomix
-
-# 3. Playwright（ブラウザを共有パス /opt/ms-playwright へ配置）
-RUN npx -y playwright@${PLAYWRIGHT_VERSION} install --with-deps chromium \
-    && chmod -R a+rwX ${PLAYWRIGHT_BROWSERS_PATH}
-
-# 4. Python 仮想環境の作成と機械学習・音声処理パッケージのインストール
-RUN python3 -m venv ${VIRTUAL_ENV} \
-    && uv pip install --upgrade pip \
-    && uv pip install --no-cache \
-        torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL} \
-    && uv pip install --no-cache \
-        gymnasium \
-        stable-baselines3 \
-        librosa \
-        soundfile \
-        onnx \
-        onnxruntime \
-        scikit-learn \
-        pytest \
-    && chmod -R a+rwX ${VIRTUAL_ENV}
-
-# 5. opencode のインストール（全ユーザーから使えるよう /usr/local/bin へ配置）
-RUN curl -fsSL https://opencode.ai/v2/install | bash \
-    && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
-    && rm -rf /root/.opencode
   </file>
 </files>

@@ -46,8 +46,12 @@ RUN npm install -g repomix \
     && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
     && rm -rf /root/.opencode
 
-# 4. 必須ライブラリをグローバル領域に焼き込む
-RUN pio pkg install -g --library "${PIO_LIBRARIES}"
+# 4. 必須ライブラリをグローバル領域に焼き込む（スペース区切りで複数指定に対応）
+RUN if [ -n "${PIO_LIBRARIES}" ]; then \
+      for lib in ${PIO_LIBRARIES}; do \
+        pio pkg install -g --library "${lib}"; \
+      done; \
+    fi
 
 # 5. ダミープロジェクトでESP32 / ESP32-S3のツールチェーン＆フレームワークを焼き込む
 RUN mkdir -p /tmp/pio-warmup/src \
