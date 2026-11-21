@@ -1,0 +1,338 @@
+<files>
+  <file path="base/.devcontainer/.env.example">
+# 必須: dockerfiles/のDockerfileを指定 (webapp.Dockerfile または m5.Dockerfile)
+DOCKERFILE_NAME=Dockerfile
+
+# 必須: プロジェクトのフォルダ名（devcontainer.json の workspaceFolder と一致させる）
+PROJECT_NAME=my-project
+
+# ==========================================
+# ビルド時・ベースイメージ関連
+# ==========================================
+# ベースイメージの指定
+# webapp用: mcr.microsoft.com/devcontainers/typescript-node:26-trixie
+# m5用: mcr.microsoft.com/devcontainers/cpp:trixie
+DEVCONTAINER_IMAGE=mcr.microsoft.com/devcontainers/typescript-node:26-trixie
+
+# 各種ツール・ライブラリのバージョンやURL
+PLAYWRIGHT_VERSION=1.52.0
+NODE_MAJOR_VERSION=22
+PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+PIO_LIBRARIES=m5stack/M5Unified
+
+# ==========================================
+# ネットワーク・デバイス・実行ユーザー設定
+# ==========================================
+# 推論サーバーのホスト名とIPアドレス
+INFER_HOST=dev-infer.local
+DEV_INFER_IP=192.168.1.100
+
+# フロントエンド開発 / noVNC 等のポート
+APP_PORT=5173
+NOVNC_PORT=6080
+
+# M5Stack等と通信する際のシリアルデバイスパス
+# 接続しない場合は /dev/null、接続時は /dev/ttyUSB0 などを指定
+SERIAL_DEVICE=/dev/null
+
+# 実行ユーザー (root もしくは vscode, node 等ベースイメージに依存)
+CONTAINER_USER=root
+
+# ホスト側のCaddyルート証明書パス（initialize.sh で自動設定されます）
+# HOST_CA_CERT_PATH=/etc/caddy/certs/ca.crt
+  </file>
+
+  <file path="base/.devcontainer/devcontainer.json">
+{
+  // プロジェクトのディレクトリ名を自動でコンテナ名に反映
+  "name": "${localWorkspaceFolderBasename} Dev Container",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  // ホスト側のフォルダ名と自動一致させる
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+
+  // ホスト側で実行：.devcontainer/.env を自動生成して docker-compose.yml に渡す
+  "initializeCommand": "bash .devcontainer/initialize.sh",
+
+  // --- プロジェクトの技術スタックに合わせて調整する箇所 ---
+  "forwardPorts": [], // 必要に応じて許可する
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        // --- Frontend / Vite.js ---
+        "Vue.volar", // Vue 3 公式サポート（React等の場合は不要）
+        "dbaeumer.vscode-eslint", // JS/TS 静的解析
+        "esbenp.prettier-vscode", // コードフォーマット
+        "bradlc.vscode-tailwindcss", // Tailwind CSS を使う場合
+
+        // --- Python ---
+        "ms-python.python", // Python 実行・仮想環境(.venv)の自動認識
+        "ms-python.vscode-pylance", // 高速な型補完・定義ジャンプ
+        "charliermarsh.ruff", // Rust製の超高速 Linter / Formatter
+
+        // --- Embedded / C++ ---
+        "platformio.platformio-ide" // PlatformIO本体（C/C++拡張も自動で入る）
+      ],
+      "settings": {
+        "platformio-ide.useBuiltinPIOCore": true,
+        "platformio-ide.customPATH": "/usr/local/bin",
+        "platformio-ide.pioHomeServerHttpHost": "127.0.0.1",
+        "platformio-ide.autoOpenPlatformIOHome": false
+      }
+    }
+  },
+  // ----------------------------------------------------
+
+  // 実行ユーザーは docker-compose.yml 側の `user:` に委譲するためコメントアウトまたは削除
+  // "remoteUser": "root",
+
+  // コンテナ作成後に実行：証明書反映と依存パッケージのセットアップ
+  "postCreateCommand": "bash .devcontainer/post-create.sh"
+}
+  </file>
+
+  <file path="base/.devcontainer/docker-compose.yml">
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: dockerfiles/${DOCKERFILE_NAME:?Dockerfile name must be set}
+      args:
+        BASE_IMAGE: ${DEVCONTAINER_IMAGE:-mcr.microsoft.com/devcontainers/typescript-node:26-trixie}
+        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.52.0}
+        NODE_MAJOR_VERSION: ${NODE_MAJOR_VERSION:-22}
+        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+        PIO_LIBRARIES: ${PIO_LIBRARIES:-m5stack/M5Unified}
+    volumes:
+      - ..:/workspaces/${PROJECT_NAME:?PROJECT_NAME must be set}:cached
+      # node_modules をコンテナ専用ボリュームにしてI/Oとリビルド時の再DLを高速化
+      - node_modules:/workspaces/${PROJECT_NAME}/node_modules
+      - ${HOST_CA_CERT_PATH:-/etc/caddy/certs/ca.crt}:/usr/local/share/ca-certificates/caddy-ca.crt:ro
+    environment:
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
+      REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      DISPLAY: :99
+      XDG_RUNTIME_DIR: /tmp/runtime-${CONTAINER_USER:-root}
+    ports:
+      - "${APP_PORT:-5173}:${APP_PORT:-5173}"
+      - "${NOVNC_PORT:-6080}:${NOVNC_PORT:-6080}"
+    devices:
+      # シリアルデバイスをホストからコンテナへパススルー（不要な場合は /dev/null 等で回避）
+      - "${SERIAL_DEVICE:-/dev/null}:${SERIAL_DEVICE:-/dev/null}"
+    user: "${CONTAINER_USER:-root}"
+    command: sleep infinity
+    extra_hosts:
+      - "${INFER_HOST:-dev-infer.local}:${DEV_INFER_IP:?DEV_INFER_IP must be set}"
+
+volumes:
+  node_modules:
+  </file>
+
+  <file path="base/.devcontainer/initialize.sh">
+#!/usr/bin/env bash
+set -euo pipefail
+
+ENV_FILE=".devcontainer/.env"
+ENV_EXAMPLE_FILE=".devcontainer/.env.example"
+
+# 1. .env が未作成で .env.example がある場合は初期コピー
+if [[ ! -f "$ENV_FILE" && -f "$ENV_EXAMPLE_FILE" ]]; then
+  cp "$ENV_EXAMPLE_FILE" "$ENV_FILE"
+fi
+touch "$ENV_FILE"
+
+# 2. IPv4 名前解決ヘルパー（Linux / macOS 対応）
+resolve_ipv4() {
+  local host="$1"
+  if command -v getent >/dev/null 2>&1; then
+    getent ahostsv4 "$host" 2>/dev/null | awk '{print $1; exit}'
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c "import socket; print(socket.gethostbyname('$host'))" 2>/dev/null || true
+  fi
+}
+
+# 3. .env の特定キーだけを安全に更新・追記する関数（他の行は維持）
+upsert_env() {
+  local key="$1"
+  local value="$2"
+  local file="$3"
+
+  awk -v k="$key" -v v="$value" '
+    BEGIN { found = 0 }
+    $0 ~ "^" k "=" { print k "=" v; found = 1; next }
+    { print }
+    END { if (!found) print k "=" v }
+  ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+}
+
+# 4. INFER_HOST の名前解決と .env への反映
+# .env から INFER_HOST を取得、なければデフォルト値を使用
+INFER_HOST=$(grep "^INFER_HOST=" "$ENV_FILE" | cut -d '=' -f2 || echo "dev-infer.local")
+resolved_ip=$(resolve_ipv4 "$INFER_HOST")
+resolved_ip="${resolved_ip:-127.0.0.1}"
+
+upsert_env "DEV_INFER_IP" "$resolved_ip" "$ENV_FILE"
+echo "[init] DEV_INFER_IP=${resolved_ip} (${INFER_HOST})"
+
+# 5. OSに応じたデフォルトのCaddyルート証明書パスを設定
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    DEFAULT_CERT_PATH="${HOME}/Library/Application Support/Caddy/pki/authorities/local/root.crt"
+else
+    DEFAULT_CERT_PATH="/etc/caddy/certs/ca.crt"
+fi
+
+# .env に HOST_CA_CERT_PATH が定義されていない、またはコメントアウトされている場合は追記
+if ! grep -q "^HOST_CA_CERT_PATH=" "$ENV_FILE"; then
+    upsert_env "HOST_CA_CERT_PATH" "$DEFAULT_CERT_PATH" "$ENV_FILE"
+    echo "[init] HOST_CA_CERT_PATH auto-configured for $(uname -s)"
+fi
+
+# 6. プロジェクト名の動的設定
+upsert_env "PROJECT_NAME" "${PROJECT_NAME:-$(basename "$PWD")}" "$ENV_FILE"
+  </file>
+
+  <file path="base/.devcontainer/post-create.sh">
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Dockerfile 側で全てインストール済みのため、ここでは
+# コンテナ起動時にマウントされたルート証明書をシステムに反映させる処理のみ実行
+
+if command -v sudo >/dev/null 2>&1; then
+    sudo update-ca-certificates
+else
+    update-ca-certificates
+fi
+
+echo "[post-create] CA certificates updated successfully."
+  </file>
+
+  <file path="base/dockerfiles/m5.Dockerfile">
+ARG BASE_IMAGE=mcr.microsoft.com/devcontainers/cpp:trixie
+FROM ${BASE_IMAGE}
+
+# FROM以後に再度ARGを宣言してビルド引数を利用可能にする
+ARG NODE_MAJOR_VERSION=22
+ARG PIO_LIBRARIES="m5stack/M5Unified"
+
+# ユーザー非依存の共有パスを設定（GUI関連環境変数は実行時docker-compose側へ移行）
+ENV PLATFORMIO_CORE_DIR=/opt/platformio
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+
+# 1. システムパッケージ（Python / USB / GUI・VNC関連 / Node.js）を一括導入
+RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
+    && apt-get install -y --no-install-recommends \
+       python3 \
+       python3-pip \
+       python3-venv \
+       udev \
+       usbutils \
+       curl \
+       ca-certificates \
+       libsdl2-dev \
+       xvfb \
+       imagemagick \
+       x11vnc \
+       novnc \
+       websockify \
+    && curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR_VERSION}.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    # 実行ユーザーに関わらず XDG_RUNTIME_DIR をマウントできるよう汎用ディレクトリ作成
+    && mkdir -p /tmp/runtime-root && chmod 777 /tmp/runtime-root
+
+# 2. 共有Python仮想環境（/opt/venv）に PlatformIO CLI と pyserial を導入
+RUN python3 -m venv ${VIRTUAL_ENV} \
+    && pip install --no-cache-dir --upgrade pip uv \
+    && uv pip install --no-cache \
+       platformio \
+       pyserial \
+    && chmod -R a+rwX ${VIRTUAL_ENV}
+
+# 3. 共通CLIツール（repomix / opencode）をグローバルパスへ導入
+RUN npm install -g repomix \
+    && curl -fsSL https://opencode.ai/v2/install | bash \
+    && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
+    && rm -rf /root/.opencode
+
+# 4. 必須ライブラリをグローバル領域に焼き込む
+RUN pio pkg install -g --library "${PIO_LIBRARIES}"
+
+# 5. ダミープロジェクトでESP32 / ESP32-S3のツールチェーン＆フレームワークを焼き込む
+RUN mkdir -p /tmp/pio-warmup/src \
+    && printf '%s\n' \
+      '[env:m5stack-core2]' \
+      'platform = espressif32' \
+      'board = m5stack-core2' \
+      'framework = arduino' \
+      '' \
+      '[env:m5stack-cores3]' \
+      'platform = espressif32' \
+      'board = m5stack-cores3' \
+      'framework = arduino' \
+      > /tmp/pio-warmup/platformio.ini \
+    && printf '%s\n' \
+      '#include <M5Unified.h>' \
+      'void setup() { M5.begin(); }' \
+      'void loop() {}' \
+      > /tmp/pio-warmup/src/main.cpp \
+    && pio run -d /tmp/pio-warmup \
+    && rm -rf /tmp/pio-warmup \
+    && chmod -R a+rwX ${PLATFORMIO_CORE_DIR}
+  </file>
+
+  <file path="base/dockerfiles/webapp.Dockerfile">
+ARG BASE_IMAGE=mcr.microsoft.com/devcontainers/typescript-node:26-trixie
+FROM ${BASE_IMAGE}
+
+# FROM以後に再度ARGを宣言
+ARG PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cpu"
+ARG PLAYWRIGHT_VERSION=1.52.0
+
+# ユーザーに依存しない共有パスに配置する
+ENV VIRTUAL_ENV=/opt/venv
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+
+# 1. システムパッケージ（Python、音声処理ライブラリ）と uv のインストール
+RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
+    && apt-get install -y --no-install-recommends \
+        python3 \
+        python3-pip \
+        python3-venv \
+        libsndfile1 \
+        ffmpeg \
+    && pip install --break-system-packages --no-cache-dir uv \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 2. 共通CLIツール（repomix）
+RUN npm install -g repomix
+
+# 3. Playwright（ブラウザを共有パス /opt/ms-playwright へ配置）
+RUN npx -y playwright@${PLAYWRIGHT_VERSION} install --with-deps chromium \
+    && chmod -R a+rwX ${PLAYWRIGHT_BROWSERS_PATH}
+
+# 4. Python 仮想環境の作成と機械学習・音声処理パッケージのインストール
+RUN python3 -m venv ${VIRTUAL_ENV} \
+    && uv pip install --upgrade pip \
+    && uv pip install --no-cache \
+        torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL} \
+    && uv pip install --no-cache \
+        gymnasium \
+        stable-baselines3 \
+        librosa \
+        soundfile \
+        onnx \
+        onnxruntime \
+        scikit-learn \
+        pytest \
+    && chmod -R a+rwX ${VIRTUAL_ENV}
+
+# 5. opencode のインストール（全ユーザーから使えるよう /usr/local/bin へ配置）
+RUN curl -fsSL https://opencode.ai/v2/install | bash \
+    && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
+    && rm -rf /root/.opencode
+  </file>
+</files>

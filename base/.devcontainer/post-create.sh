@@ -1,0 +1,4 @@
+
+update-ca-certificates && apt-get update && apt-get install -y --no-install-recommends build-essential libsdl2-dev xvfb imagemagick x11vnc novnc websockify && rm -rf /var/lib/apt/lists/* && pip install --upgrade pip && pip install platformio pyserial && curl -fsSL https://opencode.ai/v2/install | bash
+
+update-ca-certificates && sudo apt-get update && sudo apt-get install -y --no-install-recommends libsndfile1 ffmpeg && sudo rm -rf /var/lib/apt/lists/* && pip install --upgrade pip && pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu && pip install gymnasium stable-baselines3 librosa soundfile onnx onnxruntime scikit-learn pytest && curl -fsSL https://opencode.ai/v2/install | bash

@@ -15,19 +15,25 @@
     "vscode": {
       "extensions": [
         // --- Frontend / Vite.js ---
-        "Vue.volar",                    // Vue 3 公式サポート（React等の場合は不要）
-        "dbaeumer.vscode-eslint",       // JS/TS 静的解析
-        "esbenp.prettier-vscode",       // コードフォーマット
+        "Vue.volar", // Vue 3 公式サポート（React等の場合は不要）
+        "dbaeumer.vscode-eslint", // JS/TS 静的解析
+        "esbenp.prettier-vscode", // コードフォーマット
         "bradlc.vscode-tailwindcss", // Tailwind CSS を使う場合
 
         // --- Python ---
-        "ms-python.python",             // Python 実行・仮想環境(.venv)の自動認識
-        "ms-python.vscode-pylance",     // 高速な型補完・定義ジャンプ
-        "charliermarsh.ruff",            // Rust製の超高速 Linter / Formatter
+        "ms-python.python", // Python 実行・仮想環境(.venv)の自動認識
+        "ms-python.vscode-pylance", // 高速な型補完・定義ジャンプ
+        "charliermarsh.ruff", // Rust製の超高速 Linter / Formatter
 
         // --- Embedded / C++ ---
-        "platformio.platformio-ide"     // PlatformIO本体（C/C++拡張も自動で入る）
-      ]
+        "platformio.platformio-ide" // PlatformIO本体（C/C++拡張も自動で入る）
+      ],
+      "settings": {
+        "platformio-ide.useBuiltinPIOCore": true,
+        "platformio-ide.customPATH": "/usr/local/bin",
+        "platformio-ide.pioHomeServerHttpHost": "127.0.0.1",
+        "platformio-ide.autoOpenPlatformIOHome": false
+      }
     }
   },
   // ----------------------------------------------------

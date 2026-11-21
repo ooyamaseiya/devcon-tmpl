@@ -1,0 +1,21 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: dockerfiles/${DOCKERFILE_NAME:?Dockerfile name must be set} # Need to specify Dockerfile
+      args:
+        BASE_IMAGE: ${DEVCONTAINER_IMAGE:-mcr.microsoft.com/devcontainers/typescript-node:26-trixie}
+        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.52.0}
+    volumes:
+      - ..:/workspaces/${PROJECT_NAME:?PROJECT_NAME must be set}:cached
+      # node_modules をコンテナ専用ボリュームにしてI/Oとリビルド時の再DLを高速化
+      - node_modules:/workspaces/${PROJECT_NAME}/node_modules
+      - ${HOST_CA_CERT_PATH:-/etc/caddy/certs/ca.crt}:/usr/local/share/ca-certificates/caddy-ca.crt:ro
+    environment:
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
+    command: sleep infinity
+    extra_hosts:
+      - "${INFER_HOST:-dev-infer.local}:${DEV_INFER_IP:?DEV_INFER_IP must be set}"
+
+volumes:
+  node_modules:
