@@ -5,7 +5,7 @@ services:
       dockerfile: dockerfiles/${DOCKERFILE_NAME:?Dockerfile name must be set}
       args:
         # BASE_IMAGE は各Dockerfile固有の前提条件となるため削除
-        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.52.0}
+        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.65.0}
         NODE_MAJOR_VERSION: ${NODE_MAJOR_VERSION:-22}
         PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
         PIO_LIBRARIES: ${PIO_LIBRARIES:-m5stack/M5Unified}
