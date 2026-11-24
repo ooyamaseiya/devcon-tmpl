@@ -119,48 +119,35 @@ paths = [
 # ]
 </file>
 
-<file path="base/opencode.json">
-{
-  "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "local-server": {
-      "name": "Dev Inference Server",
-      "npm": "@ai-sdk/openai-compatible",
-      "options": {
-        "baseURL": "https://dev-infer.local/v1"
-      },
-      "models": {
-        "Qwen3.8-27B-GGUF-UD-IQ4_XS": {
-          "name": "Qwen3.8 27B",
-          "limit": {
-            "context": 81264,
-            "output": 8192
-          }
-        },
-        "Kwaipilot_KAT-Coder-V2.5-Dev-GGUF-IQ4_XS": {
-          "name": "KAT-Coder-V2.5-Dev",
-          "limit": {
-            "context": 102400,
-            "output": 8192
-          }
-        },
-        "gpt-oss-20b-mxfp4-GGUF": {
-          "name": "GPT OSS 20B",
-          "reasoning": true,
-          "limit": {
-            "context": 122880,
-            "output": 16384
-          }
-        }
-      }
-    }
-  }
-}
-</file>
-
 <file path=".gitignore">
 generated.xml
 repomix-output.xml
+</file>
+
+<file path="base/.gitignore">
+.pio
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch
+
+data/processed/
+data/processed_realistic/
+*.pth
+*.zip
+webapp/dist/
+
+generated.xml
+
+# シークレット・環境変数・秘密鍵ファイル（gitleaks との多層防御）
+.env
+.env.*
+!.env.example
+.devcontainer/.env
+*.pem
+*.key
+*.p12
+*.pfx
 </file>
 
 <file path="base/.devcontainer/devcontainer.json">
@@ -205,76 +192,11 @@ repomix-output.xml
   // ----------------------------------------------------
 
   // 実行ユーザーは docker-compose.yml 側の `user:` に委譲するためコメントアウトまたは削除
-  // "remoteUser": "root",
+  "remoteUser": "root",
 
   // コンテナ作成後に実行：証明書反映と依存パッケージのセットアップ
   "postCreateCommand": "bash .devcontainer/post-create.sh"
 }
-</file>
-
-<file path="base/.gitignore">
-.pio
-.vscode/.browse.c_cpp.db*
-.vscode/c_cpp_properties.json
-.vscode/launch.json
-.vscode/ipch
-
-data/processed/
-data/processed_realistic/
-*.pth
-*.zip
-webapp/dist/
-
-generated.xml
-
-# シークレット・環境変数・秘密鍵ファイル（gitleaks との多層防御）
-.env
-.env.*
-!.env.example
-.devcontainer/.env
-*.pem
-*.key
-*.p12
-*.pfx
-</file>
-
-<file path="base/.devcontainer/docker-compose.yml">
-services:
-  app:
-    build:
-      context: ..
-      dockerfile: dockerfiles/${DOCKERFILE_NAME:?Dockerfile name must be set}
-      args:
-        # BASE_IMAGE は各Dockerfile固有の前提条件となるため削除
-        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.52.0}
-        NODE_MAJOR_VERSION: ${NODE_MAJOR_VERSION:-22}
-        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
-        PIO_LIBRARIES: ${PIO_LIBRARIES:-m5stack/M5Unified}
-        GITLEAKS_VERSION: ${GITLEAKS_VERSION:-8.30.0}
-    volumes:
-      - ..:/workspaces/${PROJECT_NAME:?PROJECT_NAME must be set}:cached
-      # node_modules をコンテナ専用ボリュームにしてI/Oとリビルド時の再DLを高速化
-      - node_modules:/workspaces/${PROJECT_NAME}/node_modules
-      - ${HOST_CA_CERT_PATH:-/etc/caddy/certs/ca.crt}:/usr/local/share/ca-certificates/caddy-ca.crt:ro
-    environment:
-      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
-      REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
-      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
-      DISPLAY: :99
-      XDG_RUNTIME_DIR: /tmp/runtime-${CONTAINER_USER:-root}
-    ports:
-      - "${APP_PORT:-5173}:${APP_PORT:-5173}"
-      - "${NOVNC_PORT:-6080}:${NOVNC_PORT:-6080}"
-    devices:
-      # シリアルデバイスをホストからコンテナへパススルー（不要な場合は /dev/null 等で回避）
-      - "${SERIAL_DEVICE:-/dev/null}:${SERIAL_DEVICE:-/dev/null}"
-    user: "${CONTAINER_USER:-root}"
-    command: sleep infinity
-    extra_hosts:
-      - "${INFER_HOST:-dev-infer.local}:${DEV_INFER_IP:?DEV_INFER_IP must be set}"
-
-volumes:
-  node_modules:
 </file>
 
 <file path="base/.devcontainer/initialize.sh">
@@ -378,48 +300,81 @@ if [[ -d ".githooks" ]]; then
 fi
 </file>
 
-<file path="base/.devcontainer/.env.example">
-# 必須: dockerfiles/のDockerfileを指定
-DOCKERFILE_NAME=Dockerfile
+<file path="base/opencode.json">
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "local-server": {
+      "name": "Dev Inference Server",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://dev-infer.local/v1"
+      },
+      "models": {
+        "Qwen3.8-27B-GGUF-UD-IQ4_XS": {
+          "name": "Qwen3.8 27B",
+          "limit": {
+            "context": 81264,
+            "output": 8192
+          }
+        },
+        "Kwaipilot_KAT-Coder-V2.5-Dev-GGUF-IQ4_XS": {
+          "name": "KAT-Coder-V2.5-Dev",
+          "limit": {
+            "context": 102400,
+            "output": 8192
+          }
+        },
+        "gemma-4-26B-A4B-it-qat-q4_0-gguf-Q4_0": {
+          "name": "Gemma4 26B A4B",
+          "reasoning": true,
+          "limit": {
+            "context": 102400
+          }
+        }
+      }
+    }
+  }
+}
+</file>
 
-# 必須: プロジェクトのフォルダ名（devcontainer.json の workspaceFolder と一致させる）
-PROJECT_NAME=my-project
+<file path="base/.devcontainer/docker-compose.yml">
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: dockerfiles/${DOCKERFILE_NAME:?Dockerfile name must be set}
+      args:
+        # BASE_IMAGE は各Dockerfile固有の前提条件となるため削除
+        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.65.0}
+        NODE_MAJOR_VERSION: ${NODE_MAJOR_VERSION:-22}
+        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+        PIO_LIBRARIES: ${PIO_LIBRARIES:-m5stack/M5Unified}
+        GITLEAKS_VERSION: ${GITLEAKS_VERSION:-8.30.0}
+    volumes:
+      - ..:/workspaces/${PROJECT_NAME:?PROJECT_NAME must be set}:cached
+      # node_modules をコンテナ専用ボリュームにしてI/Oとリビルド時の再DLを高速化
+      - node_modules:/workspaces/${PROJECT_NAME}/node_modules
+      - ${HOST_CA_CERT_PATH:-/etc/caddy/certs/ca.crt}:/usr/local/share/ca-certificates/caddy-ca.crt:ro
+    environment:
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
+      REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      DISPLAY: :99
+      XDG_RUNTIME_DIR: /tmp/runtime-${CONTAINER_USER:-root}
+    ports:
+      - "${APP_PORT:-5173}:${APP_PORT:-5173}"
+      - "${NOVNC_PORT:-6080}:${NOVNC_PORT:-6080}"
+    devices:
+      # シリアルデバイスをホストからコンテナへパススルー（不要な場合は /dev/null 等で回避）
+      - "${SERIAL_DEVICE:-/dev/null}:${SERIAL_DEVICE:-/dev/null}"
+    user: "${CONTAINER_USER:-root}"
+    command: sleep infinity
+    extra_hosts:
+      - "${INFER_HOST:-dev-infer.local}:${DEV_INFER_IP:?DEV_INFER_IP must be set}"
 
-# ==========================================
-# ビルド時・ベースイメージ関連
-# ==========================================
-
-# 各種ツール・ライブラリのバージョンやURL
-PLAYWRIGHT_VERSION=1.52.0
-NODE_MAJOR_VERSION=22
-PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
-GITLEAKS_VERSION=8.30.0
-
-# PlatformIO グローバルライブラリ（m5.Dockerfile用）
-# 複数指定する場合はスペース区切りで記述します（バージョン指定やGit URLも可）
-# 例: PIO_LIBRARIES="m5stack/M5Unified bblanchon/ArduinoJson@^7.0.0 fastled/FastLED"
-PIO_LIBRARIES=m5stack/M5Unified
-
-# ==========================================
-# ネットワーク・デバイス・実行ユーザー設定
-# ==========================================
-# 推論サーバーのホスト名とIPアドレス
-INFER_HOST=dev-infer.local
-DEV_INFER_IP=192.168.1.100
-
-# フロントエンド開発 / noVNC 等のポート
-APP_PORT=5173
-NOVNC_PORT=6080
-
-# M5Stack等と通信する際のシリアルデバイスパス
-# 接続しない場合は /dev/null、接続時は /dev/ttyUSB0 などを指定
-SERIAL_DEVICE=/dev/null
-
-# 実行ユーザー (root もしくは vscode, node 等ベースイメージに依存)
-CONTAINER_USER=root
-
-# ホスト側のCaddyルート証明書パス（initialize.sh で自動設定されます）
-# HOST_CA_CERT_PATH=/etc/caddy/certs/ca.crt
+volumes:
+  node_modules:
 </file>
 
 <file path="base/dockerfiles/webapp.Dockerfile">
@@ -496,82 +451,48 @@ RUN ARCH=$(dpkg --print-architecture) \
     && rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_${GH_ARCH}
 </file>
 
-<file path="README.md">
-# devcon-tmpl
+<file path="base/.devcontainer/.env.example">
+# 必須: dockerfiles/のDockerfileを指定
+DOCKERFILE_NAME=Dockerfile
 
-## M5Stack シミュレーターの使い分け（m5.Dockerfile 利用時）
+# 必須: プロジェクトのフォルダ名（devcontainer.json の workspaceFolder と一致させる）
+PROJECT_NAME=my-project
 
-プロジェクトの `platformio.ini` には用途別に3つの環境を定義して使います。
+# ==========================================
+# ビルド時・ベースイメージ関連
+# ==========================================
 
-| 環境名         | 用途                   | 特徴                                          |
-| :------------- | :--------------------- | :-------------------------------------------- |
-| `env:sim`      | 自動テスト・AI確認用   | `-DAUTO_EXIT_MS=3000` により3秒で自動終了する |
-| `env:sim-live` | 人間の目視デバッグ用   | 自動終了せず、noVNC 越しに画面操作できる      |
-| `env:device`   | M5Stack 実機書き込み用 | USB 経由で実機に転送する                      |
+# 各種ツール・ライブラリのバージョンやURL
+PLAYWRIGHT_VERSION=1.65.0
+NODE_MAJOR_VERSION=22
+PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+GITLEAKS_VERSION=8.30.0
 
-### 1. ブラウザ（noVNC）で `sim-live` を確認する手順
+# PlatformIO グローバルライブラリ（m5.Dockerfile用）
+# 複数指定する場合はスペース区切りで記述します（バージョン指定やGit URLも可）
+# 例: PIO_LIBRARIES="m5stack/M5Unified bblanchon/ArduinoJson@^7.0.0 fastled/FastLED"
+PIO_LIBRARIES=m5stack/M5Unified
 
-コンテナ内で仮想ディスプレイと noVNC を起動し、ホストのブラウザで `http://localhost:6080/vnc.html` にアクセスします。
+# ==========================================
+# ネットワーク・デバイス・実行ユーザー設定
+# ==========================================
+# 推論サーバーのホスト名とIPアドレス
+INFER_HOST=dev-infer.local
+DEV_INFER_IP=192.168.1.100
 
-```bash
-# バックグラウンドで仮想画面・VNC・noVNCを起動
-Xvfb :99 -screen 0 640x480x24 &
-x11vnc -display :99 -nopw -forever -shared &
-websockify --web=/usr/share/novnc/ 6080 localhost:5900 &
+# フロントエンド開発 / noVNC 等のポート
+APP_PORT=5173
+NOVNC_PORT=6080
 
-# シミュレーターをビルドして実行
-pio run -e sim-live
-.pio/build/sim-live/program
-```
+# M5Stack等と通信する際のシリアルデバイスパス
+# 接続しない場合は /dev/null、接続時は /dev/ttyUSB0 などを指定
+SERIAL_DEVICE=/dev/null
 
-## GitHub CLI (gh) を使った PAT の保存・管理方法
+# 実行ユーザー (root もしくは vscode, node 等ベースイメージに依存)
+CONTAINER_USER=root
 
-Dev Container 内で GitHub のリポジトリにアクセスしたり、プライベートなリソースを扱うために、GitHub の Personal Access Token (PAT) を利用することがあります。
-本コンテナには GitHub CLI (`gh`) がプリインストールされています。以下の手順で安全に PAT を保存・管理できます。
-
-### 1. PAT の発行
-
-1. GitHub にログインし、`Settings` → `Developer settings` → `Personal access tokens` → `Tokens (classic)` または `Fine-grained tokens` を開きます。
-2. 必要なスコープ（`repo` 権限など）を持たせたトークンを発行し、コピーします。
-
-### 2. コンテナ内での PAT の保存
-
-コンテナのターミナルで以下のコマンドを実行し、プロンプトに従って認証を行います。
-
-```bash
-gh auth login
-```
-
-以下の手順で選択・入力して進めます：
-
-- **What account do you want to log into?** → `GitHub.com`
-- **What is your preferred protocol for Git operations?** → `HTTPS`（または `SSH`）
-- **Authenticate Git with your GitHub credentials?** → `Yes`
-- **How would you like to authenticate GitHub CLI?** → `Paste an authentication token`
-
-最後に、先ほどコピーした PAT をペーストして Enter を押します。
-
-これにより、コンテナ内に GitHub の認証情報が安全に保存され、Git 操作や `gh` コマンドで自動的に認証が行われるようになります。`.env` などに PAT を直接記述・保存する必要がなくなります。
-
-## GitHub 側の Secret Protection（Secret scanning）を有効にする手順
-
-本テンプレートではローカルの `gitleaks`（`pre-commit` フック）によるコミット前チェックに加え、GitHub リポジトリ側で **Secret Protection（Secret scanning / Push protection）** を有効化することで、トークンや API キーなどの機密情報漏洩を多層的に防止できます。
-
-> ※ パブリックリポジトリでは無料で利用できます。プライベートリポジトリの場合は、対象プラン（GitHub Secret Protection / GitHub Advanced Security）が有効になっている必要があります。
-
-### 1. Secret Protection の有効化
-
-1. GitHub で対象リポジトリのページを開き、上部の **`Settings`** タブをクリックします。
-2. 左サイドバーの `Security` セクションにある **`Advanced Security`**（表示環境によっては **`Code security and analysis`**）をクリックします。
-3. **`Secret Protection`**（または **`Secret scanning`**）の右側にある **`Enable`** ボタンをクリックします。
-4. 確認ダイアログが表示されたら、**`Enable Secret Protection`** をクリックして有効化します。
-
-### 2. Push protection の有効化（推奨）
-
-`Secret Protection` を有効化した後、あわせて **`Push protection`** を有効にしておくと、PAT や秘密鍵などが含まれるコミットを `git push` した際に GitHub 側で自動的にプッシュをブロックできます。
-
-1. 同じ **`Advanced Security`** 設定画面内の **`Push protection`** の右側にある **`Enable`** ボタンをクリックします。
-2. 有効化後、リポジトリ上部の **`Security`** タブ → 左メニューの **`Secret scanning`** から検出されたアラートの確認・管理が行えます。
+# ホスト側のCaddyルート証明書パス（initialize.sh で自動設定されます）
+# HOST_CA_CERT_PATH=/etc/caddy/certs/ca.crt
 </file>
 
 <file path="base/dockerfiles/m5.Dockerfile">
@@ -672,6 +593,145 @@ RUN mkdir -p /tmp/pio-warmup/src \
     && pio run -d /tmp/pio-warmup \
     && rm -rf /tmp/pio-warmup \
     && chmod -R a+rwX ${PLATFORMIO_CORE_DIR}
+</file>
+
+<file path="README.md">
+# devcon-tmpl
+
+## 既存の空 Git ローカルリポジトリに `base/` 以下をマージする方法
+
+本リポジトリの `base/` ディレクトリには、別プロジェクトのルートに展開して使うためのテンプレート一式（`.devcontainer/`、`.githooks/`、`dockerfiles/`、`.gitignore`、`.gitleaks.toml`、`opencode.json`）が含まれています。
+
+すでに存在する空の Git ローカルリポジトリ（`git init` 直後など）に対して、親ディレクトリ `base/` を作らず **中身だけをプロジェクトルート直下にマージ** するには、以下のいずれかの方法を使用します。
+
+### 方法 1: Git の履歴を保ったまま `base/` 以下をマージする（推奨）
+
+`git subtree split` を使って `base/` 配下のみの履歴を一時ブランチとして抽出し、対象リポジトリのルートにマージします。将来テンプレート側の `base/` が更新された際も、同様の手順で更新を取り込めます。
+
+対象のローカルリポジトリのルートディレクトリで以下を実行してください。
+
+```bash
+# 1. 空リポジトリ（コミットが0件）の場合、基準となる初期コミットを作成
+git branch -M main
+git commit --allow-empty -m "chore: initial commit"
+
+# 2. 本テンプレートリポジトリをリモートとして登録・取得
+# （ローカルパス /path/to/devcon-tmpl または GitHub リポジトリ URL を指定）
+git remote add template /path/to/devcon-tmpl
+git fetch template main
+
+# 3. 取得した履歴から base/ 配下のみを抽出したブランチを作成
+git checkout -b tmp-template-base FETCH_HEAD
+git subtree split --prefix=base -b template-base
+
+# 4. 元の main ブランチに戻り、base/ の中身をルート直下にマージ
+git checkout main
+git merge --allow-unrelated-histories template-base -m "chore: merge base template"
+
+# 5. 一時ブランチとリモートを削除（今後もテンプレート更新を追従したい場合は remote は残して可）
+git branch -D tmp-template-base template-base
+git remote remove template
+```
+
+### 方法 2: 履歴を引き継がずファイルのみをコピーする
+
+Git の履歴管理が不要で、初期ファイルとして展開したいだけの場合は、ローカルにクローンした `devcon-tmpl/base/` の中身をコピーします。
+
+```bash
+# 対象のローカルリポジトリのルートで実行（末尾を /. にすることで隠しファイルも含めてコピー）
+cp -r /path/to/devcon-tmpl/base/. .
+
+# ステージングしてコミット
+git add .
+git commit -m "chore: add base template files"
+```
+
+### マージ後の初期設定
+
+1. **使用する Dockerfile の指定**:
+   `.devcontainer/.env.example` をコピーして `.devcontainer/.env` を作成し（または Dev Container 起動時に自動生成された `.devcontainer/.env` を編集し）、`DOCKERFILE_NAME` をプロジェクトの用途に合わせて設定します。
+   - M5Stack 開発の場合: `DOCKERFILE_NAME=m5.Dockerfile`
+   - Web アプリ / Python / 音声・機械学習開発の場合: `DOCKERFILE_NAME=webapp.Dockerfile`
+2. **Git フック（`gitleaks`）の有効化**:
+   Dev Container 起動時に自動設定されますが、ホスト側でもコミット前に有効化する場合は以下を実行します。
+   ```bash
+   chmod +x .githooks/*
+   git config --local core.hooksPath .githooks
+   ```
+
+## M5Stack シミュレーターの使い分け（m5.Dockerfile 利用時）
+
+プロジェクトの `platformio.ini` には用途別に3つの環境を定義して使います。
+
+| 環境名         | 用途                   | 特徴                                          |
+| :------------- | :--------------------- | :-------------------------------------------- |
+| `env:sim`      | 自動テスト・AI確認用   | `-DAUTO_EXIT_MS=3000` により3秒で自動終了する |
+| `env:sim-live` | 人間の目視デバッグ用   | 自動終了せず、noVNC 越しに画面操作できる      |
+| `env:device`   | M5Stack 実機書き込み用 | USB 経由で実機に転送する                      |
+
+### 1. ブラウザ（noVNC）で `sim-live` を確認する手順
+
+コンテナ内で仮想ディスプレイと noVNC を起動し、ホストのブラウザで `http://localhost:6080/vnc.html` にアクセスします。
+
+```bash
+# バックグラウンドで仮想画面・VNC・noVNCを起動
+Xvfb :99 -screen 0 640x480x24 &
+x11vnc -display :99 -nopw -forever -shared &
+websockify --web=/usr/share/novnc/ 6080 localhost:5900 &
+
+# シミュレーターをビルドして実行
+pio run -e sim-live
+.pio/build/sim-live/program
+```
+
+## GitHub CLI (gh) を使った PAT の保存・管理方法
+
+Dev Container 内で GitHub のリポジトリにアクセスしたり、プライベートなリソースを扱うために、GitHub の Personal Access Token (PAT) を利用することがあります。
+本コンテナには GitHub CLI (`gh`) がプリインストールされています。以下の手順で安全に PAT を保存・管理できます。
+
+### 1. PAT の発行
+
+1. GitHub にログインし、`Settings` → `Developer settings` → `Personal access tokens` → `Tokens (classic)` または `Fine-grained tokens` を開きます。
+2. 必要なスコープ（`repo` 権限など）を持たせたトークンを発行し、コピーします。
+
+### 2. コンテナ内での PAT の保存
+
+コンテナのターミナルで以下のコマンドを実行し、プロンプトに従って認証を行います。
+
+```bash
+gh auth login
+```
+
+以下の手順で選択・入力して進めます：
+
+- **What account do you want to log into?** → `GitHub.com`
+- **What is your preferred protocol for Git operations?** → `HTTPS`（または `SSH`）
+- **Authenticate Git with your GitHub credentials?** → `Yes`
+- **How would you like to authenticate GitHub CLI?** → `Paste an authentication token`
+
+最後に、先ほどコピーした PAT をペーストして Enter を押します。
+
+これにより、コンテナ内に GitHub の認証情報が安全に保存され、Git 操作や `gh` コマンドで自動的に認証が行われるようになります。`.env` などに PAT を直接記述・保存する必要がなくなります。
+
+## GitHub 側の Secret Protection（Secret scanning）を有効にする手順
+
+本テンプレートではローカルの `gitleaks`（`pre-commit` フック）によるコミット前チェックに加え、GitHub リポジトリ側で **Secret Protection（Secret scanning / Push protection）** を有効化することで、トークンや API キーなどの機密情報漏洩を多層的に防止できます。
+
+> ※ パブリックリポジトリでは無料で利用できます。プライベートリポジトリの場合は、対象プラン（GitHub Secret Protection / GitHub Advanced Security）が有効になっている必要があります。
+
+### 1. Secret Protection の有効化
+
+1. GitHub で対象リポジトリのページを開き、上部の **`Settings`** タブをクリックします。
+2. 左サイドバーの `Security` セクションにある **`Advanced Security`**（表示環境によっては **`Code security and analysis`**）をクリックします。
+3. **`Secret Protection`**（または **`Secret scanning`**）の右側にある **`Enable`** ボタンをクリックします。
+4. 確認ダイアログが表示されたら、**`Enable Secret Protection`** をクリックして有効化します。
+
+### 2. Push protection の有効化（推奨）
+
+`Secret Protection` を有効化した後、あわせて **`Push protection`** を有効にしておくと、PAT や秘密鍵などが含まれるコミットを `git push` した際に GitHub 側で自動的にプッシュをブロックできます。
+
+1. 同じ **`Advanced Security`** 設定画面内の **`Push protection`** の右側にある **`Enable`** ボタンをクリックします。
+2. 有効化後、リポジトリ上部の **`Security`** タブ → 左メニューの **`Secret scanning`** から検出されたアラートの確認・管理が行えます。
 </file>
 
 </files>
