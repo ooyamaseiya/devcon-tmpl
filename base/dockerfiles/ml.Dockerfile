@@ -9,22 +9,41 @@ ARG GH_VERSION=2.62.0
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
-# 1. システムパッケージ（音声処理ライブラリ）と uv のインストール
+# MuJoCo / MyoSuite のオフスクリーン（画面なし）描画用環境変数
+ENV MUJOCO_GL=osmesa
+ENV PYOPENGL_PLATFORM=osmesa
+
+# 1. システムパッケージ（音声処理・Box2Dビルド・MuJoCo描画）と uv のインストール
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get install -y --no-install-recommends \
         libsndfile1 \
         ffmpeg \
+        build-essential \
+        swig \
+        xvfb \
+        patchelf \
+        libgl1 \
+        libglx-mesa0 \
+        libosmesa6-dev \
+        libglfw3 \
+        libglew-dev \
+        libglib2.0-0 \
     && pip install --no-cache-dir uv \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 2. Python 仮想環境の作成と機械学習・音声処理パッケージのインストール
+# 2. Python 仮想環境の作成と機械学習・強化学習・音声処理パッケージのインストール
 RUN python3 -m venv ${VIRTUAL_ENV} \
     && uv pip install --upgrade pip \
     && uv pip install --no-cache \
         torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL} \
     && uv pip install --no-cache \
-        gymnasium \
+        "gymnasium[box2d]" \
+        myosuite \
         stable-baselines3 \
+        tensorboard \
+        matplotlib \
+        "imageio[ffmpeg]" \
+        moviepy \
         librosa \
         soundfile \
         onnx \
